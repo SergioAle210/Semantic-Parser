@@ -1,4 +1,10 @@
-# Compiscript
+# Analisis Semantico
+
+## Integrantes
+
+- Sergio Orellana 221122
+- Rodrigo Mansilla 22611
+- Andre Marroquin 22266
 
 Un compilador moderno con soporte para múltiples backends, diseñado para el curso de Compiladores.
 
@@ -15,19 +21,11 @@ Un compilador moderno con soporte para múltiples backends, diseñado para el cu
 
 ## 📁 Estructura del Proyecto
 
-
-
 ## 🛠️ Requisitos
-
-  
 
 ## 🚀 Instalación
 
-
-
 ## 📚 Documentación
-
-
 
 ## 📄 Licencia
 
