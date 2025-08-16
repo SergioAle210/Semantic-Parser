@@ -1,13 +1,4 @@
-let a: integer = 10;
-let b = 2;
-
-function foo(): void {
-  if (a > b) {
-    a = a + b;
-  } else {
-    a = a - b;
-  }
-  return;
+let s: integer = 0;
+for (let i: integer = 0; i < 3; i = i + 1) {
+  s = s + i;
 }
-
-foo();
