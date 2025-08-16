@@ -4,14 +4,43 @@ from antlr.parser.generated.CompiscriptParser import CompiscriptParser
 from antlr4 import ParserRuleContext
 
 from antlr.sema.ast import (
-    Loc, Program, Block, VarDecl, ConstDecl, Assign, If, While, Return,
-    Break, Continue, ExprStmt, Identifier, Literal, Unary, Binary, Ternary,
-    Call, MemberAccess, IndexAccess, ArrayLiteral, This,
-    Param, FunctionDecl   # <-- añade esto
+    Loc,
+    Program,
+    Block,
+    VarDecl,
+    ConstDecl,
+    Assign,
+    If,
+    While,
+    Return,
+    Break,
+    Continue,
+    ExprStmt,
+    Identifier,
+    Literal,
+    Unary,
+    Binary,
+    Ternary,
+    Call,
+    MemberAccess,
+    IndexAccess,
+    ArrayLiteral,
+    This,
+    Param,
+    FunctionDecl,
+    ClassDecl,
+    For,
+    Foreach,
+    Switch,
+    SwitchCase,
+    TryCatch,
 )
+
+
 def loc_of(ctx):
     t = ctx.start
     return Loc(t.line, t.column)
+
 
 class ASTBuilder(CompiscriptVisitor):
     # --- Programa / Bloques ---
@@ -39,7 +68,7 @@ class ASTBuilder(CompiscriptVisitor):
         t_ann = None
         if ctx.typeAnnotation() is not None:
             txt = ctx.typeAnnotation().getText()
-            t_ann = txt[1:len(txt)]
+            t_ann = txt[1 : len(txt)]
         init = None
         if ctx.initializer() is not None:
             init = self.visit(ctx.initializer().expression())
@@ -50,35 +79,34 @@ class ASTBuilder(CompiscriptVisitor):
         t_ann = None
         if ctx.typeAnnotation() is not None:
             txt = ctx.typeAnnotation().getText()
-            t_ann = txt[1:len(txt)]
+            t_ann = txt[1 : len(txt)]
         init = self.visit(ctx.expression())
         return ConstDecl(loc_of(ctx), name, t_ann, init)
 
     def visitAssignment(self, ctx):
-        # Caso: Identifier '=' expression ';'
-        if ctx.Identifier() is not None:
-            target = Identifier(loc_of(ctx), ctx.Identifier().getText())
-            # En esta regla, expression() puede devolver lista (por la otra alternativa).
-            # Tomamos la primera expresión de forma robusta.
-            exprs = ctx.expression()
-            if isinstance(exprs, list):
-                value = self.visit(exprs[0])
-            else:
-                value = self.visit(exprs)
+        # En esta regla, expression() está sobrecargado:
+        #  - Alt 1: Identifier '=' expression ';'          -> 1 expresión
+        #  - Alt 2: expression '.' Identifier '=' expression ';' -> 2 expresiones
+        exprs = ctx.expression()  # en Python devuelve siempre una lista
+        if len(exprs) == 1:
+            # Identifier '=' expression ';'
+            name = ctx.Identifier().getText()  # <-- sin índice
+            target = Identifier(loc_of(ctx), name)
+            value = self.visit(exprs[0])
             return Assign(loc_of(ctx), target, value)
 
-        # Caso: expression '.' Identifier '=' expression ';'
-        lhs = self.visit(ctx.expression(0))
-        name = ctx.Identifier().getText()
-        rhs  = self.visit(ctx.expression(1))
-        return Assign(loc_of(ctx), MemberAccess(loc_of(ctx), lhs, name), rhs)
+        # expression '.' Identifier '=' expression ';'
+        obj = self.visit(ctx.expression(0))
+        prop_name = ctx.Identifier().getText()  # <-- sin índice
+        rhs = self.visit(ctx.expression(1))
+        return Assign(loc_of(ctx), MemberAccess(loc_of(ctx), obj, prop_name), rhs)
 
     def visitExpressionStatement(self, ctx):
         return ExprStmt(loc_of(ctx), self.visit(ctx.expression()))
 
     def visitPrintStatement(self, ctx):
         callee = Identifier(loc_of(ctx), "print")
-        args = [ self.visit(ctx.expression()) ]
+        args = [self.visit(ctx.expression())]
         return ExprStmt(loc_of(ctx), Call(loc_of(ctx), callee, args))
 
     def visitIfStatement(self, ctx):
@@ -159,7 +187,7 @@ class ASTBuilder(CompiscriptVisitor):
         left = self.visit(ctx.relationalExpr(0))
         i = 1
         while i < len(ctx.relationalExpr()):
-            op = ctx.getChild(i*2 - 1).getText()
+            op = ctx.getChild(i * 2 - 1).getText()
             right = self.visit(ctx.relationalExpr(i))
             left = Binary(loc_of(ctx), op, left, right)
             i = i + 1
@@ -169,7 +197,7 @@ class ASTBuilder(CompiscriptVisitor):
         left = self.visit(ctx.additiveExpr(0))
         i = 1
         while i < len(ctx.additiveExpr()):
-            op = ctx.getChild(i*2 - 1).getText()
+            op = ctx.getChild(i * 2 - 1).getText()
             right = self.visit(ctx.additiveExpr(i))
             left = Binary(loc_of(ctx), op, left, right)
             i = i + 1
@@ -179,7 +207,7 @@ class ASTBuilder(CompiscriptVisitor):
         left = self.visit(ctx.multiplicativeExpr(0))
         i = 1
         while i < len(ctx.multiplicativeExpr()):
-            op = ctx.getChild(i*2 - 1).getText()  
+            op = ctx.getChild(i * 2 - 1).getText()
             right = self.visit(ctx.multiplicativeExpr(i))
             left = Binary(loc_of(ctx), op, left, right)
             i = i + 1
@@ -189,7 +217,7 @@ class ASTBuilder(CompiscriptVisitor):
         left = self.visit(ctx.unaryExpr(0))
         i = 1
         while i < len(ctx.unaryExpr()):
-            op = ctx.getChild(i*2 - 1).getText()    
+            op = ctx.getChild(i * 2 - 1).getText()
             right = self.visit(ctx.unaryExpr(i))
             left = Binary(loc_of(ctx), op, left, right)
             i = i + 1
@@ -221,20 +249,24 @@ class ASTBuilder(CompiscriptVisitor):
             return ArrayLiteral(loc_of(ctx), elems)
 
         txt = ctx.getText()
-        if txt == "true":  return Literal(loc_of(ctx), True, "boolean")
-        if txt == "false": return Literal(loc_of(ctx), False, "boolean")
-        if txt == "null":  return Literal(loc_of(ctx), None, "null")
+        if txt == "true":
+            return Literal(loc_of(ctx), True, "boolean")
+        if txt == "false":
+            return Literal(loc_of(ctx), False, "boolean")
+        if txt == "null":
+            return Literal(loc_of(ctx), None, "null")
 
-        if len(txt) >= 2 and txt[0] == '"' and txt[len(txt)-1] == '"':
-            inner = txt[1:len(txt)-1]
+        if len(txt) >= 2 and txt[0] == '"' and txt[len(txt) - 1] == '"':
+            inner = txt[1 : len(txt) - 1]
             return Literal(loc_of(ctx), inner, "string")
 
         j = 0
         ok = True
         while j < len(txt):
             ch = txt[j]
-            if ch < '0' or ch > '9':
-                ok = False; break
+            if ch < "0" or ch > "9":
+                ok = False
+                break
             j = j + 1
         if ok:
             return Literal(loc_of(ctx), int(txt), "int")
@@ -252,7 +284,10 @@ class ASTBuilder(CompiscriptVisitor):
 
     def visit_with_receiver(self, op_ctx, recv):
         # CallExpr | IndexExpr | PropertyAccessExpr
-        if getattr(op_ctx, "arguments", None) is not None or op_ctx.getChild(0).getText() == "(":
+        if (
+            getattr(op_ctx, "arguments", None) is not None
+            or op_ctx.getChild(0).getText() == "("
+        ):
             args = []
             if op_ctx.arguments() is not None:
                 exprs = op_ctx.arguments().expression()
@@ -299,17 +334,105 @@ class ASTBuilder(CompiscriptVisitor):
                 pctx = ps[i]
                 pname = pctx.Identifier().getText()
                 tann = None
-                if pctx.type_() is not None:          
+                if pctx.type_() is not None:
                     tann = pctx.type_().getText()
                 params.append(Param(loc_of(pctx), pname, tann))
                 i += 1
 
         # tipo de retorno
         ret_ann = None
-        if ctx.type_() is not None:                   
+        if ctx.type_() is not None:
             ret_ann = ctx.type_().getText()
 
         # cuerpo
         body = self.visit(ctx.block())
 
         return FunctionDecl(loc_of(ctx), name, params, ret_ann, body)
+
+    def _to_block_from_statements(self, loc, stmts_ctx):
+        # Construye un Block a partir de una lista de parser-rule statements
+        stmts = []
+        if stmts_ctx is not None:
+            i = 0
+            while i < len(stmts_ctx):
+                stmts.append(self.visit(stmts_ctx[i]))
+                i += 1
+        from antlr.sema.ast import Block
+
+        return Block(loc, stmts)
+
+    # for '(' (variableDeclaration | assignment | ';') expression? ';' expression? ')' block;
+    def visitForStatement(self, ctx):
+
+        init = None
+        # init: variableDeclaration | assignment | ';'
+        if ctx.variableDeclaration() is not None:
+            init = self.visit(ctx.variableDeclaration())
+        elif ctx.assignment() is not None:
+            # assignment produce un Assign (sentencia), lo envolvemos si hace falta
+            init = self.visit(ctx.assignment())
+        # cond y update
+        cond = self.visit(ctx.expression(0)) if ctx.expression(0) is not None else None
+        update_expr = (
+            self.visit(ctx.expression(1)) if ctx.expression(1) is not None else None
+        )
+        body = self.visit(ctx.block())
+        return For(loc_of(ctx), init, cond, update_expr, body)
+
+    # foreach '(' Identifier 'in' expression ')' block;
+    def visitForeachStatement(self, ctx):
+
+        name = ctx.Identifier().getText()
+        iterable = self.visit(ctx.expression())
+        body = self.visit(ctx.block())
+        return Foreach(loc_of(ctx), name, iterable, body)
+
+    # try block 'catch' '(' Identifier ')' block;
+    def visitTryCatchStatement(self, ctx):
+
+        try_block = self.visit(ctx.block(0))
+        err_name = ctx.Identifier().getText()
+        catch_block = self.visit(ctx.block(1))
+        return TryCatch(loc_of(ctx), try_block, err_name, catch_block)
+
+    # switch '(' expression ')' '{' switchCase* defaultCase? '}'
+    def visitSwitchStatement(self, ctx):
+
+        discr = self.visit(ctx.expression())
+        cases = []
+        sc = ctx.switchCase()
+        i = 0
+        while i < len(sc):
+            c = sc[i]
+            case_expr = self.visit(c.expression())
+            blk = self._to_block_from_statements(loc_of(c), c.statement())
+            cases.append(SwitchCase(loc_of(c), case_expr, blk))
+            i += 1
+        default_block = None
+        if ctx.defaultCase() is not None:
+            d = ctx.defaultCase()
+            default_block = self._to_block_from_statements(loc_of(d), d.statement())
+        return Switch(loc_of(ctx), discr, cases, default_block)
+
+    # class Identifier (':' Identifier)? '{' classMember* '}'
+    def visitClassDeclaration(self, ctx):
+
+        name = ctx.Identifier(0).getText()
+        base_name = (
+            ctx.Identifier(1).getText() if ctx.Identifier(1) is not None else None
+        )
+        members = []
+        cms = ctx.classMember()
+        i = 0
+        while i < len(cms):
+            members.append(self.visit(cms[i]))
+            i += 1
+        return ClassDecl(loc_of(ctx), name, base_name, members)
+
+    # classMember: functionDeclaration | variableDeclaration | constantDeclaration;
+    def visitClassMember(self, ctx):
+        if ctx.functionDeclaration() is not None:
+            return self.visit(ctx.functionDeclaration())
+        if ctx.variableDeclaration() is not None:
+            return self.visit(ctx.variableDeclaration())
+        return self.visit(ctx.constantDeclaration())

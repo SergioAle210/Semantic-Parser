@@ -10,20 +10,21 @@
 #  'class'     definición de clase
 #  'field'     campo de clase (usamos VarSymbol con .kind='field')
 
+
 class Symbol:
     def __init__(self, name, kind, typ):
-        self.name = name      # str
-        self.kind = kind      # 'var','const','param','func','class','field'
-        self.typ  = typ       # Type (de types.py) o None
-        self.inited = False   # para vars/consts
+        self.name = name  # str
+        self.kind = kind  # 'var','const','param','func','class','field'
+        self.typ = typ  # Type (de types.py) o None
+        self.inited = False  # para vars/consts
         # Para funciones:
-        self.params = []      # lista de ParamSymbol (si func)
+        self.params = []  # lista de ParamSymbol (si func)
         self.return_type = None
         self.is_method = False
-        self.captures = []    # lista de Symbol capturados (si func)
+        self.captures = []  # lista de Symbol capturados (si func)
         # Para clases:
-        self.members = {}     # nombre -> Symbol (campos/métodos/ctor) si class
-        self.ctor = None      # FunctionSymbol del constructor si existe
+        self.members = {}  # nombre -> Symbol (campos/métodos/ctor) si class
+        self.ctor = None  # FunctionSymbol del constructor si existe
 
     def add_param(self, psym):
         # psym: ParamSymbol
@@ -58,44 +59,46 @@ class Symbol:
 
 class VarSymbol(Symbol):
     def __init__(self, name, typ):
-        Symbol.__init__(self, name, 'var', typ)
+        Symbol.__init__(self, name, "var", typ)
 
 
 class ConstSymbol(Symbol):
     def __init__(self, name, typ):
-        Symbol.__init__(self, name, 'const', typ)
+        Symbol.__init__(self, name, "const", typ)
         self.inited = False  # se marcará True al validar init
 
 
 class ParamSymbol(Symbol):
     def __init__(self, name, typ):
-        Symbol.__init__(self, name, 'param', typ)
+        Symbol.__init__(self, name, "param", typ)
         self.inited = True  # parámetros nacen inicializados
 
 
 class FunctionSymbol(Symbol):
     def __init__(self, name, return_type):
-        Symbol.__init__(self, name, 'func', None)
+        Symbol.__init__(self, name, "func", None)
         self.return_type = return_type
         self.is_method = False  # el checker la pondrá True si pertenece a clase
 
 
 class ClassSymbol(Symbol):
-    def __init__(self, name):
-        Symbol.__init__(self, name, 'class', None)
+    def __init__(self, name, base_name=None):
+        Symbol.__init__(self, name, "class", None)
         self.members = {}
         self.ctor = None
+        self.base_name = base_name
 
 
 # -----------------------
 # Scopes y entorno (stack)
 # -----------------------
 
+
 class Scope:
-    def __init__(self, parent=None, owner_kind='block', owner_symbol=None):
+    def __init__(self, parent=None, owner_kind="block", owner_symbol=None):
         # owner_kind: 'block' | 'function' | 'class'
         self.parent = parent
-        self.table = {}           # name -> Symbol
+        self.table = {}  # name -> Symbol
         self.owner_kind = owner_kind
         self.owner_symbol = owner_symbol
 
@@ -104,7 +107,7 @@ class Scope:
         if sym.name in self.table:
             raise Exception("Redeclaración en el mismo ámbito: " + sym.name)
         # prohibir sobrecarga simple de funciones en mismo scope
-        if sym.kind == 'func' and sym.name in self.table:
+        if sym.kind == "func" and sym.name in self.table:
             raise Exception("Función duplicada: " + sym.name)
         self.table[sym.name] = sym
         return sym
@@ -124,28 +127,28 @@ class Scope:
         return None, None
 
     def is_function_scope(self):
-        return self.owner_kind == 'function'
+        return self.owner_kind == "function"
 
     def is_class_scope(self):
-        return self.owner_kind == 'class'
+        return self.owner_kind == "class"
 
 
 class Env:
     def __init__(self):
-        self.global_scope = Scope(None, 'block', None)
+        self.global_scope = Scope(None, "block", None)
         self.scope = self.global_scope
 
     # --- push/pop ---
     def push_block(self):
-        self.scope = Scope(self.scope, 'block', None)
+        self.scope = Scope(self.scope, "block", None)
         return self.scope
 
     def push_function(self, funsym):
-        self.scope = Scope(self.scope, 'function', funsym)
+        self.scope = Scope(self.scope, "function", funsym)
         return self.scope
 
     def push_class(self, classsym):
-        self.scope = Scope(self.scope, 'class', classsym)
+        self.scope = Scope(self.scope, "class", classsym)
         return self.scope
 
     def pop(self):
@@ -212,13 +215,13 @@ class Env:
 
         if above:
             funsym = nearest_fun_scope.owner_symbol
-            if funsym is not None and funsym.kind == 'func':
+            if funsym is not None and funsym.kind == "func":
                 funsym.add_capture(sym)
 
     # --- utilidades de clase ---
     def class_add_field(self, classsym, name, typ):
         fld = VarSymbol(name, typ)
-        fld.kind = 'field'
+        fld.kind = "field"
         classsym.add_member(fld)
         return fld
 
@@ -235,9 +238,24 @@ class Env:
         classsym.set_constructor(ctor)
         return ctor
 
+    def resolve_class(self, name):
+        sym, _ = self.resolve(name)
+        if sym is not None and sym.kind == "class":
+            return sym
+        return None
+
     def class_lookup_member(self, classsym, name):
-        if name in classsym.members:
-            return classsym.members[name]
+        # Busca en la clase y recorre la cadena de herencia
+        cur = classsym
+        visited = set()
+        while cur is not None:
+            if name in cur.members:
+                return cur.members[name]
+            bname = getattr(cur, "base_name", None)
+            if not bname or bname in visited:
+                break
+            visited.add(bname)
+            cur = self.resolve_class(bname)
         return None
 
     # --- helpers para saber contexto ---
@@ -257,5 +275,3 @@ class Env:
                 return cur.owner_symbol
             cur = cur.parent
         return None
-
-
