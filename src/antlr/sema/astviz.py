@@ -1,16 +1,20 @@
+# clase para construir un grafo dot (graphviz) a partir de un ast
 class DotBuilder:
     def __init__(self):
         self.lines = []
         self.counter = 0
 
+    # genera un id único para cada nodo del grafo
     def nid(self):
         s = "n" + str(self.counter)
         self.counter = self.counter + 1
         return s
 
+    # añade una línea raw al buffer dot
     def add(self, s):
         self.lines.append(s)
 
+    # escapa caracteres especiales en etiquetas dot
     def escape(self, s):
         res = ""
         i = 0
@@ -27,6 +31,7 @@ class DotBuilder:
             i = i + 1
         return res
 
+    # construye el texto dot completo a partir de la raíz del ast
     def build(self, root):
         self.lines = []
         self.add("digraph AST {")
@@ -35,6 +40,7 @@ class DotBuilder:
         self.add("}")
         return "\n".join(self.lines)
 
+    # define la etiqueta mostrada en cada nodo según su tipo
     def _label_of(self, node):
         name = node.__class__.__name__
         # Etiquetas especiales primero
@@ -54,7 +60,7 @@ class DotBuilder:
         if name == "Foreach":
             return "Foreach\\n" + node.var_name
 
-        # genérico
+        # genérico (fallbacks si el nodo no es de los casos especiales)
         if hasattr(node, "op"):
             return name + "\\n" + node.op
         if hasattr(node, "name"):
@@ -63,6 +69,7 @@ class DotBuilder:
             return name + "\\n" + node.kind
         return name
 
+    # enumera los hijos y sus etiquetas de arista según el tipo de nodo
     def _children_of(self, node):
         out = []
         n = node.__class__.__name__
@@ -159,6 +166,7 @@ class DotBuilder:
                 i += 1
         return out
 
+    # emite un nodo y sus hijos recursivamente; devuelve el id del nodo
     def _emit(self, node):
         my = self.nid()
         self.add(my + ' [label="' + self.escape(self._label_of(node)) + '"];')
