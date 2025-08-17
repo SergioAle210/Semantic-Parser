@@ -210,10 +210,18 @@ def binary_result(op, lt, rt):
         return None
 
     # Aritméticos
-    if op == "+" or op == "-" or op == "*" or op == "/":
+    if op == "+" or op == "-" or op == "*" or op == "/" or op == "%":
         # Soporte string + string -> string (opcional; el resto, no permitido)
-        if op == "+" and is_string(lt) and is_string(rt):
+        if op == "+" and (is_string(lt) or is_string(rt)):
+            # evita cosas sin sentido como string + (func/void)
+            if is_func(lt) or is_func(rt) or is_void(lt) or is_void(rt):
+                return None
             return T_STRING()
+        if op == "%":
+            if is_int(lt) and is_int(rt):
+                return T_INT()
+            return None
+        # numéricos
         u = unify_numeric(lt, rt)
         if u is None:
             return None

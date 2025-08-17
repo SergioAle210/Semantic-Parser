@@ -80,7 +80,12 @@ class ASTBuilder(CompiscriptVisitor):
         if ctx.typeAnnotation() is not None:
             txt = ctx.typeAnnotation().getText()
             t_ann = txt[1 : len(txt)]
-        init = self.visit(ctx.expression())
+
+        init = None
+
+        if ctx.expression() is not None:
+            init = self.visit(ctx.expression())
+
         return ConstDecl(loc_of(ctx), name, t_ann, init)
 
     def visitAssignment(self, ctx):

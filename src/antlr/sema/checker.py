@@ -177,6 +177,12 @@ class Checker:
         f.return_type = ret_t
         f.typ = T_FUNC(pts, ret_t)
 
+        body = self._func_body(n)
+        if body is not None:
+            self.env.push_function(f)  # ámbito de la función
+            self._collect(body)  # aquí se verán funciones anidadas
+            self.env.pop()
+
     def _collect_Program(self, n):
         i = 0
         while i < len(n.statements):
@@ -258,6 +264,11 @@ class Checker:
                         pts.append(pt)
                         j += 1
                     ctor.typ = T_FUNC(pts, T_VOID())
+
+                    if getattr(m, "body", None) is not None:
+                        self.env.push_function(ctor)
+                        self._collect(m.body)
+                        self.env.pop()
                 else:
                     ret_t = T_VOID()
                     if getattr(m, "ret_ann", None) is not None:
@@ -278,12 +289,24 @@ class Checker:
                         pts.append(pt)
                         j += 1
                     meth.typ = T_FUNC(pts, ret_t)
+
+                    if getattr(m, "body", None) is not None:
+                        self.env.push_function(meth)
+                        self._collect(m.body)
+                        self.env.pop()
             i += 1
 
         if getattr(n, "base_name", None):
             C.base_name = n.base_name
-            self.env.push_class(C)
 
+        self.env.pop()
+
+    def _collect_Block(self, n):
+        self.env.push_block()
+        i = 0
+        while i < len(n.statements):
+            self._collect(n.statements[i])
+            i += 1
         self.env.pop()
 
     def _declare_builtins(self):
@@ -560,8 +583,6 @@ class Checker:
             if base_sym is None or base_sym.kind != "class":
                 self.err(n.loc, "Clase base no declarada: " + class_sym.base_name)
 
-        self.env.push_class(class_sym)
-        self.env.pop()
         return None
 
     # --- statements ---
@@ -730,13 +751,18 @@ class Checker:
         rt = self.visit(n.right)
         r = binary_result(n.op, lt, rt)
         if r is None:
-            if n.op == "&&" or n.op == "||":
+            if n.op in ["&&", "||"]:
                 self.err(n.loc, "Operadores '&&' y '||' requieren boolean")
-            elif n.op == "+" or n.op == "-" or n.op == "*" or n.op == "/":
-                self.err(
-                    n.loc,
-                    "Operación aritmética requiere numéricos (o string+string para '+')",
-                )
+            elif n.op in ["+", "-", "*", "/", "%"]:
+                if n.op == "+":
+                    self.err(
+                        n.loc,
+                        "Operación aritmética requiere numéricos (o string+any para '+')",
+                    )
+                elif n.op == "%":
+                    self.err(n.loc, "Operación '%' requiere integer")
+                else:
+                    self.err(n.loc, "Operación aritmética requiere numéricos")
             else:
                 self.err(
                     n.loc,
