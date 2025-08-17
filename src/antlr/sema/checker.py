@@ -313,8 +313,9 @@ class Checker:
         # print: (any) -> void   (acepta cualquier tipo)
         try:
             f = self.env.declare_func("print", T_VOID())
-            f.typ = T_FUNC([T_UNKNOWN()], T_VOID())  # <-- comodín
+            f.typ = T_FUNC([T_UNKNOWN()], T_VOID())
             f.return_type = T_VOID()
+            f.is_builtin = True
         except Exception:
             pass
 
