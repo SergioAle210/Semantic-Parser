@@ -1,4 +1,4 @@
-# Generated from ./grammar/Compiscript.g4 by ANTLR 4.13.1
+# Generated from grammar/Compiscript.g4 by ANTLR 4.13.1
 from antlr4 import *
 if "." in __name__:
     from .CompiscriptParser import CompiscriptParser
