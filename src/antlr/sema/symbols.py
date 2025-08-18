@@ -1,14 +1,4 @@
-# -------------------------------------------
-# Compiscript - Símbolos y Ámbitos (vanilla)
-# -------------------------------------------
-
-# Kinds:
-#  'var'       variable mutable
-#  'const'     constante
-#  'param'     parámetro de función
-#  'func'      función libre o método (is_method=True)
-#  'class'     definición de clase
-#  'field'     campo de clase (usamos VarSymbol con .kind='field')
+# Compiscript simbolos y ambitos var const param func class field campo de clase con VarSymbol
 
 
 # símbolo base con metadatos comunes

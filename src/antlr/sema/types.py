@@ -1,12 +1,10 @@
+# clase de tipo genérico para el sistema de tipos
 class Type:
     def __init__(self, kind, info=None):
-        # kind: 'int','float','bool','string','void','null','array','class','func','unknown'
-        # info: para array -> Type elem
-        #       para class -> nombre (str)
-        #       para func  -> ( [param_types], return_type )
         self.kind = kind
         self.info = info
 
+    # igualdad estructural entre tipos (incluye chequeo profundo para array/class/func)
     def __eq__(self, other):
         if other is None:
             return False
@@ -29,6 +27,7 @@ class Type:
             return r1 == r2
         return True
 
+    # representación de texto para depuración y mensajes
     def __str__(self):
         if self.kind == "array":
             return "array(" + str(self.info) + ")"
@@ -90,6 +89,7 @@ def T_FUNC(params, ret):
 
 
 # Predicados de tipo
+# true si el tipo es numérico int o float
 def is_numeric(t):
     return t is not None and (t.kind == "int" or t.kind == "float")
 
@@ -134,8 +134,8 @@ def is_unknown(t):
     return t is not None and t.kind == "unknown"
 
 
+# referencias: class/array/string (para políticas de null)
 def is_reference_like(t):
-    # Para políticas de null: consideramos "referencia" a class/array/string
     return is_class(t) or is_array(t) or is_string(t)
 
 
@@ -145,21 +145,18 @@ def can_widen(src, dst):
     return is_int(src) and is_float(dst)
 
 
+# define si un valor de tipo src puede asignarse a una variable de tipo dst
 def assignable(src, dst):
-    # ¿puede un valor de tipo 'src' asignarse a una variable de tipo 'dst'?
     if src is None or dst is None:
         return False
     if src == dst:
         return True
     if can_widen(src, dst):
         return True
-    # null a tipos de referencia (array/class/string)
     if is_null(src) and is_reference_like(dst):
         return True
-    # arrays estrictos (no permitimos int[] -> float[] automáticamente)
     if is_array(src) and is_array(dst):
         return assignable(src.info, dst.info) and (src.info == dst.info)
-    # funciones/clases: solo exactamente iguales
     return False
 
 
@@ -174,10 +171,8 @@ def unify_numeric(a, b):
 
 # Comparaciones y compatibilidad
 def compare_compatible(a, b, op):
-    # < <= > >=  → numéricos
     if op == "<" or op == "<=" or op == ">" or op == ">=":
         return is_numeric(a) and is_numeric(b)
-    # == != → mismo tipo, o numéricos entre sí, o referencias con null
     if a == b:
         return True
     if is_numeric(a) and is_numeric(b):
@@ -189,7 +184,6 @@ def compare_compatible(a, b, op):
 
 # Resultado de unario
 def unary_result(op, t):
-    # '!' → bool   ;   '-' → numérico
     if op == "!":
         if is_bool(t):
             return T_BOOL()
@@ -201,19 +195,15 @@ def unary_result(op, t):
     return None
 
 
-# Resultado de binario (sin efectos de casting más allá de int->float)
+# resultado de un binario incluye promoción int->float y soporte de string +
 def binary_result(op, lt, rt):
-    # Lógicos
     if op == "&&" or op == "||":
         if is_bool(lt) and is_bool(rt):
             return T_BOOL()
         return None
 
-    # Aritméticos
     if op == "+" or op == "-" or op == "*" or op == "/" or op == "%":
-        # Soporte string + string -> string (opcional; el resto, no permitido)
         if op == "+" and (is_string(lt) or is_string(rt)):
-            # evita cosas sin sentido como string + (func/void)
             if is_func(lt) or is_func(rt) or is_void(lt) or is_void(rt):
                 return None
             return T_STRING()
@@ -221,30 +211,26 @@ def binary_result(op, lt, rt):
             if is_int(lt) and is_int(rt):
                 return T_INT()
             return None
-        # numéricos
         u = unify_numeric(lt, rt)
         if u is None:
             return None
         return u
 
-    # Comparaciones
     if op == "==" or op == "!=" or op == "<" or op == "<=" or op == ">" or op == ">=":
         if compare_compatible(lt, rt, op):
             return T_BOOL()
         return None
 
-    # Otros: no soportado
     return None
 
 
-# Unión para operador ternario cond ? a : b
+# unificación de tipos para el operador ternario cond ? a : b
 def ternary_unify(a, b):
     if a == b:
         return a
     u = unify_numeric(a, b)
     if u is not None:
         return u
-    # null con referencia → referencia
     if is_null(a) and is_reference_like(b):
         return b
     if is_null(b) and is_reference_like(a):
@@ -252,7 +238,7 @@ def ternary_unify(a, b):
     return None
 
 
-# Arrays / Índices / Literales
+# tipo resultante de indexar un arreglo
 def index_result(arr_t, idx_t):
     if not is_array(arr_t):
         return None
@@ -261,8 +247,8 @@ def index_result(arr_t, idx_t):
     return arr_t.info
 
 
+# infiere el tipo de elemento de un literal de arreglo
 def array_literal_element_type(elem_types):
-    # elem_types: lista de Type
     if elem_types is None or len(elem_types) == 0:
         return T_UNKNOWN()
     t0 = elem_types[0]
@@ -274,14 +260,13 @@ def array_literal_element_type(elem_types):
         elif is_numeric(t0) and is_numeric(ti):
             t0 = unify_numeric(t0, ti)
         else:
-            return T_UNKNOWN()  # heterogéneo
+            return T_UNKNOWN()
         i = i + 1
     return t0
 
 
-# Funciones / llamadas
+# valida compatibilidad de llamada: aridad y asignabilidad por posición
 def call_compatible(fun_t, arg_types):
-    # Devuelve (ok, bad_index) -- bad_index = -1 si ok
     if not is_func(fun_t):
         return (False, -1)
     params, ret = fun_t.info
@@ -289,7 +274,6 @@ def call_compatible(fun_t, arg_types):
         return (False, -1)
     i = 0
     while i < len(params):
-        # Si el parámetro es unknown, lo aceptamos como comodín
         if is_unknown(params[i]):
             i = i + 1
             continue
@@ -299,20 +283,19 @@ def call_compatible(fun_t, arg_types):
     return (True, -1)
 
 
+# atajo para construir un tipo de función
 def func_of(param_types, ret_type):
     return T_FUNC(param_types, ret_type)
 
 
-# Parsing de anotaciones: "integer", "float", "boolean", "string", "Id", con '[]'
+# convierte texto como "int", "float", "boolean", "string", "Id", con sufijos '[]' a type
 def parse_type_text(txt):
-    # base
     i = 0
     base = ""
     while i < len(txt) and txt[i] != "[":
         base = base + txt[i]
         i = i + 1
 
-    # normaliza algunos alias por si aparecen en ejemplos
     if base == "integer" or base == "int":
         cur = T_INT()
     elif base == "float":
@@ -324,10 +307,8 @@ def parse_type_text(txt):
     elif base == "void":
         cur = T_VOID()
     else:
-        # identificador de clase
         cur = T_CLASS(base)
 
-    # sufijos []
     while i < len(txt):
         if i + 1 < len(txt) and txt[i] == "[" and txt[i + 1] == "]":
             cur = T_ARRAY(cur)
