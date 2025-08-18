@@ -1,8 +1,4 @@
-# -------------------------------------------
-# Compiscript - Checker semántico (vanilla)
-# Recorre TU AST (no el ParseTree)
-# -------------------------------------------
-
+# cheker semantico recorre tu AST no el ParseTree
 from antlr.sema.types import *
 from antlr.sema.symbols import (
     Env,
@@ -14,6 +10,7 @@ from antlr.sema.symbols import (
 )
 
 
+# clase principal del verificador semántico
 class Checker:
     def __init__(self):
         self.errors = []
@@ -22,29 +19,32 @@ class Checker:
         self._dead_stack = []
         self._in_collect = False
 
-    # ----- util -----
+    # registra un error con ubicación
     def err(self, loc, msg):
         self.errors.append("[" + str(loc.line) + ":" + str(loc.col) + "] " + msg)
 
+    # inicia una nueva región para detección de código muerto
     def _dead_push(self):
         self._dead_stack.append(False)
 
+    # finaliza la región de código muerto actual
     def _dead_pop(self):
         if len(self._dead_stack) > 0:
             self._dead_stack.pop()
 
+    # marca que a partir de aquí el código es inalcanzable
     def _dead_mark(self):
         if len(self._dead_stack) > 0:
             self._dead_stack[len(self._dead_stack) - 1] = True
 
+    # consulta si se está en zona de código muerto
     def _dead_is(self):
         if len(self._dead_stack) == 0:
             return False
         return self._dead_stack[len(self._dead_stack) - 1]
 
-    # === Helpers robustos para detectar funciones ===
+    # busca un hijo de tipo 'Block' dentro de cualquier atributo del nodo
     def _find_block_child(self, n):
-        # busca cualquier atributo cuyo .__class__.__name__ == "Block"
         for k in dir(n):
             if len(k) > 0 and k[0] == "_":
                 continue
@@ -59,13 +59,14 @@ class Checker:
                     return v
         return None
 
+    # obtiene la lista de parámetros de un nodo que luce como función
     def _find_params_list(self, n):
         # intenta 'params' o 'parameters'
         if hasattr(n, "params"):
             return n.params
         if hasattr(n, "parameters"):
             return n.parameters
-        # como fallback: primer atributo que sea lista de nodos con atributo 'name'
+        # como fallback primer atributo que sea lista de nodos con atributo 'name'
         for k in dir(n):
             if len(k) > 0 and k[0] == "_":
                 continue
@@ -74,7 +75,7 @@ class Checker:
             except Exception:
                 continue
             if isinstance(v, list) and len(v) >= 0:
-                # lista vacía sirve (función sin params)
+                # lista vacía sirve
                 if len(v) == 0:
                     return v
                 first = v[0]
@@ -82,14 +83,15 @@ class Checker:
                     return v
         return []
 
+    # heurística para saber si un nodo es tipo función
     def _is_func_like(self, n):
-        # 1) por nombre de clase
+        # por nombre de clase
         cname = n.__class__.__name__
         low = ""
         i = 0
         while i < len(cname):
             ch = cname[i]
-            # tolower manual sin helpers: solo A-Z
+            # tolower manual sin helpers solo A-Z
             if "A" <= ch <= "Z":
                 low = low + chr(ord(ch) + 32)
             else:
@@ -97,16 +99,18 @@ class Checker:
             i += 1
         if ("func" in low) or ("function" in low):
             return True
-        # 2) heurística por atributos: debe tener 'name' y un Block hijo
+        #  heurística por atributos debe tener 'name' y un Block hijo
         if hasattr(n, "name"):
             blk = self._find_block_child(n)
             if blk is not None:
                 return True
         return False
 
+    # devuelve los parámetros de una función
     def _func_params(self, n):
         return self._find_params_list(n)
 
+    # devuelve el cuerpo block de una función
     def _func_body(self, n):
         # intenta 'body' y 'block' primero
         if hasattr(n, "body"):
@@ -116,6 +120,7 @@ class Checker:
         # fallback: buscar Block en atributos
         return self._find_block_child(n)
 
+    # obtiene la anotación de retorno de la función si existe
     def _func_ret_ann(self, n):
         # intentos comunes
         if hasattr(n, "ret_ann"):
@@ -127,7 +132,7 @@ class Checker:
             return n.type_ann
         return None
 
-    # ----- entrada -----
+    # ejecuta los dos pases: colección y chequeo
     def run(self, root):
         self._declare_builtins()
         self._in_collect = True
@@ -135,7 +140,7 @@ class Checker:
         self._in_collect = False
         self.visit(root)
 
-    # ================== PASE 1: COLECCIÓN (firmas) ==================
+    # recorre el árbol recogiendo firmas de funciones/clases
     def _collect(self, n):
         if n is None:
             return
@@ -153,6 +158,7 @@ class Checker:
                 self._collect(n.statements[i])
                 i += 1
 
+    # recolecta una función genérica (no necesariamente FunctionDecl)
     def _collect_FunctionLike(self, n):
         ret_t = T_VOID()
         ra = self._func_ret_ann(n)
@@ -183,12 +189,14 @@ class Checker:
             self._collect(body)  # aquí se verán funciones anidadas
             self.env.pop()
 
+    # recolecta a nivel programa
     def _collect_Program(self, n):
         i = 0
         while i < len(n.statements):
             self._collect(n.statements[i])
             i += 1
 
+    # recolecta una declaración de función clásica
     def _collect_FunctionDecl(self, n):
         ret_t = T_VOID()
         if getattr(n, "ret_ann", None) is not None:
@@ -213,6 +221,7 @@ class Checker:
         f.return_type = ret_t
         f.typ = T_FUNC(pts, ret_t)
 
+    # recolecta una declaración de clase y sus miembros
     def _collect_ClassDecl(self, n):
         try:
             C = self.env.declare_class(n.name)
@@ -301,6 +310,7 @@ class Checker:
 
         self.env.pop()
 
+    # abre un nuevo ámbito de bloque durante la colección
     def _collect_Block(self, n):
         self.env.push_block()
         i = 0
@@ -309,8 +319,8 @@ class Checker:
             i += 1
         self.env.pop()
 
+    # declara funciones builtin básicas
     def _declare_builtins(self):
-        # print: (any) -> void   (acepta cualquier tipo)
         try:
             f = self.env.declare_func("print", T_VOID())
             f.typ = T_FUNC([T_UNKNOWN()], T_VOID())
@@ -319,7 +329,8 @@ class Checker:
         except Exception:
             pass
 
-    # ================== PASE 2: CHEQUEO ==================
+    # paso 2 chequeo
+    # despacha a visit_* según el tipo de nodo
     def visit(self, node):
         if node is None:
             return None
@@ -331,7 +342,7 @@ class Checker:
             return self.visit_FunctionLike(node)
         return T_UNKNOWN()
 
-    # --- programa / bloque ---
+    # programa / bloque
     def visit_Program(self, n):
         self._dead_push()
         i = 0
@@ -344,6 +355,7 @@ class Checker:
         self._dead_pop()
         return None
 
+    # visita un bloque con manejo de ámbito y código muerto
     def visit_Block(self, n):
         self.env.push_block()
         self._dead_push()
@@ -358,7 +370,7 @@ class Checker:
         self.env.pop()
         return None
 
-    # --- declaraciones ---
+    # declaraciones
     def visit_VarDecl(self, n):
         t = None
         if getattr(n, "type_ann", None) is not None:
@@ -389,6 +401,7 @@ class Checker:
                         sym.inited = True
         return None
 
+    # declara constantes y obliga a inicialización compatible
     def visit_ConstDecl(self, n):
         if getattr(n, "init", None) is None:
             self.err(n.loc, "Const '" + n.name + "' requiere inicialización")
@@ -419,7 +432,7 @@ class Checker:
             sym.inited = True
         return None
 
-    # --- funciones y clases ---
+    # funciones y clases
     def visit_FunctionLike(self, n):
         fun_sym, _ = self.env.resolve(n.name)
         if fun_sym is None or fun_sym.kind != "func":
@@ -469,6 +482,7 @@ class Checker:
         self.env.pop()
         return None
 
+    # visita una clase y verifica compatibilidad de miembros
     def visit_ClassDecl(self, n):
         class_sym, _ = self.env.resolve(n.name)
         if class_sym is None or class_sym.kind != "class":
@@ -586,7 +600,8 @@ class Checker:
 
         return None
 
-    # --- statements ---
+    # statements
+    # valida una asignación lhs = rhs
     def visit_Assign(self, n):
         lhs_t = None
         lhs_sym = None
@@ -663,6 +678,7 @@ class Checker:
                 )
         return None
 
+    # valida un if con condición booleana
     def visit_If(self, n):
         ct = self.visit(n.cond)
         if not is_bool(ct):
@@ -672,6 +688,7 @@ class Checker:
             self.visit(n.else_blk)
         return None
 
+    # valida un while y su cuerpo
     def visit_While(self, n):
         ct = self.visit(n.cond)
         if not is_bool(ct):
@@ -681,6 +698,7 @@ class Checker:
         self.loop_depth -= 1
         return None
 
+    # valida return contra el tipo esperado y marca código muerto
     def visit_Return(self, n):
         funsym = self.env.current_function_symbol()
         if funsym is None:
@@ -698,23 +716,27 @@ class Checker:
         self._dead_mark()
         return None
 
+    # valida uso de break dentro de bucles
     def visit_Break(self, n):
         if self.loop_depth <= 0:
             self.err(n.loc, "break sólo puede usarse dentro de bucles")
         self._dead_mark()
         return None
 
+    # valida uso de continue dentro de bucles
     def visit_Continue(self, n):
         if self.loop_depth <= 0:
             self.err(n.loc, "continue sólo puede usarse dentro de bucles")
         self._dead_mark()
         return None
 
+    # evalúa una expresión independiente efectos laterales
     def visit_ExprStmt(self, n):
         self.visit(n.expr)
         return None
 
-    # --- expresiones ---
+    # expresiones
+    # resuelve un identificador y devuelve su tipo
     def visit_Identifier(self, n):
         sym, def_scope = self.env.resolve(n.name)
         if sym is None:
@@ -723,6 +745,7 @@ class Checker:
         self.env.note_capture_if_needed(def_scope, sym)
         return sym.typ if sym.typ is not None else T_UNKNOWN()
 
+    #  mapea literales a tipos del sistema
     def visit_Literal(self, n):
         if n.kind == "int":
             return T_INT()
@@ -734,6 +757,7 @@ class Checker:
             return T_NULL()
         return T_UNKNOWN()
 
+    # valida operador unario contra el tipo del operando
     def visit_Unary(self, n):
         t = self.visit(n.expr)
         r = unary_result(n.op, t)
@@ -747,6 +771,7 @@ class Checker:
             return T_UNKNOWN()
         return r
 
+    # valida operador binario y compatibilidad de operandos
     def visit_Binary(self, n):
         lt = self.visit(n.left)
         rt = self.visit(n.right)
@@ -772,6 +797,7 @@ class Checker:
             return T_UNKNOWN()
         return r
 
+    # valida el operador ternario y unifica tipos de ramas
     def visit_Ternary(self, n):
         ct = self.visit(n.cond)
         if not is_bool(ct):
@@ -790,6 +816,7 @@ class Checker:
             return T_UNKNOWN()
         return u
 
+    # valida acceso por índice a arreglos
     def visit_IndexAccess(self, n):
         arr_t = self.visit(n.obj)
         idx_t = self.visit(n.index)
@@ -804,6 +831,7 @@ class Checker:
             return T_UNKNOWN()
         return res
 
+    # construye el tipo de arreglo a partir de elementos
     def visit_ArrayLiteral(self, n):
         ts = []
         i = 0
@@ -815,6 +843,7 @@ class Checker:
             self.err(n.loc, "Arreglo con elementos de tipo incompatible")
         return T_ARRAY(elem_t)
 
+    # resuelve acceso a miembro: campos y métodos
     def visit_MemberAccess(self, n):
         obj_t = self.visit(n.obj)
         if is_class(obj_t):
@@ -834,8 +863,8 @@ class Checker:
         self.err(n.loc, "Acceso a miembro sobre un valor no-clase: " + str(obj_t))
         return T_UNKNOWN()
 
+    # valida llamadas a funciones, métodos y constructores
     def visit_Call(self, n):
-        # args
         args = []
         i = 0
         while i < len(n.args):
@@ -911,6 +940,7 @@ class Checker:
         self.err(n.loc, "Intento de llamar a un valor no-invocable")
         return T_UNKNOWN()
 
+    # valida el uso de 'this' dentro de métodos de clase
     def visit_This(self, n):
         cls = self.env.current_class_symbol()
         fun = self.env.current_function_symbol()
@@ -919,31 +949,27 @@ class Checker:
             return T_UNKNOWN()
         return T_CLASS(cls.name)
 
-    # --- for ---
+    # maneja el for con sus tres componentes y ámbito propio
     def visit_For(self, n):
-        # Scope propio para el for (init vive aquí)
         self.env.push_block()
-        # init
         if n.init is not None:
             self.visit(n.init)
-        # cond
         if n.cond is not None:
             tcond = self.visit(n.cond)
             if not is_bool(tcond):
                 self.err(
                     n.loc, "La condición del 'for' debe ser boolean, no " + str(tcond)
                 )
-        # cuerpo
         self.loop_depth += 1
         self.visit(n.body)
         self.loop_depth -= 1
-        # update (solo chequeo de tipos/uso)
         if n.update is not None:
             self.visit(n.update)
         self.env.pop()
         return None
 
     # --- foreach (Identifier in expression) ---
+
     def visit_Foreach(self, n):
         arr_t = self.visit(n.iterable)
         elem_t = T_UNKNOWN()
@@ -963,7 +989,8 @@ class Checker:
         self.env.pop()
         return None
 
-    # --- switch ---
+    # valida un switch y que cada case sea compatible con el discriminante
+
     def visit_Switch(self, n):
         discr_t = self.visit(n.expr)
         self.env.push_block()
@@ -972,7 +999,6 @@ class Checker:
         while i < len(n.cases):
             c = n.cases[i]
             ct = self.visit(c.expr)
-            # compatibilidad simple: mismos tipos (o asignables mutuamente)
             if not (assignable(ct, discr_t) and assignable(discr_t, ct)):
                 self.err(
                     c.loc,
@@ -988,12 +1014,11 @@ class Checker:
         self.env.pop()
         return None
 
-    # --- try/catch ---
+    # valida bloque try/catch con variable de error agnóstica
     def visit_TryCatch(self, n):
         self.env.push_block()
         self.visit(n.try_block)
         self.env.pop()
-        # catch con variable de error (tipo desconocido/agnóstico)
         self.env.push_block()
         try:
             esym = self.env.declare_var(n.err_name, T_UNKNOWN())
