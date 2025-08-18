@@ -123,6 +123,8 @@ class Scope:
     def is_class_scope(self):
         return self.owner_kind == "class"
 
+
+class Env:
     # entorno con pila de scopes y utilidades de declaración/resoluciónclass Env:
     def __init__(self):
         self.global_scope = Scope(None, "block", None)
