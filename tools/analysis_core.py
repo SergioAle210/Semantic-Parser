@@ -26,10 +26,8 @@ from antlr.sema.types import Type, T_INT, T_STRING, is_func, is_void, is_string,
 #               Utilidades SIN re/strip
 # =========================================================
 
-
 def _is_space(ch: str) -> bool:
     return ch == " " or ch == "\t" or ch == "\r" or ch == "\n"
-
 
 def _trim_manual(s: str) -> str:
     n = len(s)
@@ -44,7 +42,6 @@ def _trim_manual(s: str) -> str:
         return ""
     return s[i : j + 1]
 
-
 def _split_lines_manual(s: str) -> List[str]:
     out: List[str] = []
     cur_chars: List[str] = []
@@ -58,14 +55,12 @@ def _split_lines_manual(s: str) -> List[str]:
     out.append("".join(cur_chars))
     return out
 
-
 def _count_char(s: str, ch: str) -> int:
     c = 0
     for x in s:
         if x == ch:
             c += 1
     return c
-
 
 def _index_of(s: str, sub: str, start: int = 0) -> int:
     n = len(s)
@@ -84,10 +79,8 @@ def _index_of(s: str, sub: str, start: int = 0) -> int:
         i += 1
     return -1
 
-
 def _contains(s: str, sub: str) -> bool:
     return _index_of(s, sub, 0) >= 0
-
 
 def _extract_between(s: str, after: str, before: str) -> str:
     i = _index_of(s, after, 0)
@@ -98,7 +91,6 @@ def _extract_between(s: str, after: str, before: str) -> str:
     if j < 0:
         return ""
     return s[i:j]
-
 
 def _is_digits(s: str) -> bool:
     if len(s) == 0:
@@ -111,15 +103,12 @@ def _is_digits(s: str) -> bool:
         i += 1
     return True
 
-
 def _is_quoted_string(s: str) -> bool:
     return (len(s) >= 2) and (s[0] == '"') and (s[len(s) - 1] == '"')
-
 
 # =========================================================
 #            Infra de errores léx/sintax (ANTLR)
 # =========================================================
-
 
 class CollectingErrorListener(ErrorListener):
     def __init__(self, kind: str):
@@ -132,15 +121,12 @@ class CollectingErrorListener(ErrorListener):
             {"kind": self.kind, "line": int(line), "col": int(column), "message": msg}
         )
 
-
 # =========================================================
 #              Serialización (símbolos/func/clase)
 # =========================================================
 
-
 def _type_str(t: Optional[Type]) -> Optional[str]:
     return str(t) if t is not None else None
-
 
 def _serialize_function(fsym) -> Dict[str, Any]:
     params = []
@@ -162,7 +148,6 @@ def _serialize_function(fsym) -> Dict[str, Any]:
         "captures": caps,
         "builtin": bool(getattr(fsym, "is_builtin", False)),
     }
-
 
 def _serialize_class(env, csym) -> Dict[str, Any]:
     fields = []
@@ -205,7 +190,6 @@ def _serialize_class(env, csym) -> Dict[str, Any]:
         "inherited": inherited,
     }
 
-
 def snapshot_symbols(checker: Checker) -> Dict[str, Any]:
     env = checker.env
     g = env.global_scope.table
@@ -232,11 +216,9 @@ def snapshot_symbols(checker: Checker) -> Dict[str, Any]:
         }
     }
 
-
 # =========================================================
 #                      Tokens / Hover
 # =========================================================
-
 
 def collect_tokens(ts: CommonTokenStream) -> List[Dict[str, Any]]:
     toks = []
@@ -259,7 +241,6 @@ def collect_tokens(ts: CommonTokenStream) -> List[Dict[str, Any]]:
         i += 1
     return toks
 
-
 def find_token_at(ts: CommonTokenStream, line: int, col: int):
     if ts.tokens is None:
         return None
@@ -279,7 +260,6 @@ def find_token_at(ts: CommonTokenStream, line: int, col: int):
                 return t
         i += 1
     return None
-
 
 def hover_at(code: str, line: int, col: int) -> Dict[str, Any]:
     # prepara lexer/parser para tokens
@@ -318,11 +298,9 @@ def hover_at(code: str, line: int, col: int) -> Dict[str, Any]:
             return {"token": text, "kind": "class", "type": "class"}
     return {"token": text, "kind": "identifier", "type": None}
 
-
 # =========================================================
 #                     Análisis principal
 # =========================================================
-
 
 def analyze_internal(
     code: str,
@@ -359,11 +337,9 @@ def analyze_internal(
     }
     return out
 
-
 # =========================================================
 #                   Quick-Fixes sin regex
 # =========================================================
-
 
 def _class_members_from_symbols(symbols: Dict[str, Any], cls_name: str) -> List[str]:
     gl = symbols.get("globals", {})
@@ -401,7 +377,6 @@ def _class_members_from_symbols(symbols: Dict[str, Any], cls_name: str) -> List[
             return out
         i += 1
     return []
-
 
 def suggest_fixes(
     code: str, sem_errors: List[str], symbols: Dict[str, Any]
@@ -564,11 +539,9 @@ def suggest_fixes(
 
     return fixes
 
-
 # =========================================================
 #                Formateador sin strip/regex
 # =========================================================
-
 
 def format_code(code: str) -> str:
     lines = _split_lines_manual(code)

@@ -1,3 +1,4 @@
+# app.py
 from __future__ import annotations
 
 import sys
@@ -8,7 +9,7 @@ import time
 import streamlit as st
 
 # --- Rutas ---
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[0]
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
@@ -26,13 +27,11 @@ HAS_CODE_EDITOR = False
 CODE_EDITOR_FLAVOR = None
 try:
     from code_editor import code_editor  # pip install streamlit-code-editor
-
     HAS_CODE_EDITOR = True
     CODE_EDITOR_FLAVOR = "code_editor"
 except Exception:
     try:
-        from streamlit_code_editor import code_editor
-
+        from streamlit_code_editor import code_editor  # variante antigua
         HAS_CODE_EDITOR = True
         CODE_EDITOR_FLAVOR = "streamlit_code_editor"
     except Exception:
@@ -163,7 +162,6 @@ if sel_example != st.session_state.last_example:
     except Exception as ex:
         st.sidebar.error("No se pudo cargar el ejemplo: " + str(ex))
 
-
 # -----------------------------
 # Helpers (sin regex/strip)
 # -----------------------------
@@ -188,14 +186,12 @@ def _parse_sem_line(msg: str):
                 return {"line": lnum, "col": cnum, "message": txt}
     return {"line": None, "col": None, "message": msg}
 
-
 def _count_list(lst):
     c, i = 0, 0
     while i < len(lst):
         c += 1
         i += 1
     return c
-
 
 def _join_params(plist: List[Dict[str, Any]]) -> str:
     if plist is None:
@@ -214,7 +210,6 @@ def _join_params(plist: List[Dict[str, Any]]) -> str:
         j += 1
     return s
 
-
 # --------- utilidades de normalización (sin regex/strip) ----------
 def _tolower(s: str) -> str:
     out = []
@@ -228,7 +223,6 @@ def _tolower(s: str) -> str:
             out.append(ch)
         i += 1
     return "".join(out)
-
 
 def _to_int(x: Any, default_val: int) -> int:
     if isinstance(x, int):
@@ -244,7 +238,6 @@ def _to_int(x: Any, default_val: int) -> int:
         if seen:
             return n
     return default_val
-
 
 def _norm_diag_from_dict(e: Dict[str, Any], default_kind: str) -> Dict[str, Any]:
     line = 1
@@ -295,7 +288,6 @@ def _norm_diag_from_dict(e: Dict[str, Any], default_kind: str) -> Dict[str, Any]
 
     return {"kind": kind, "line": int(line), "col": int(col), "message": msg}
 
-
 def _norm_diag(e: Any, default_kind: str) -> Dict[str, Any]:
     if isinstance(e, dict):
         return _norm_diag_from_dict(e, default_kind)
@@ -313,7 +305,6 @@ def _norm_diag(e: Any, default_kind: str) -> Dict[str, Any]:
     # num/otro
     return {"kind": default_kind, "line": 1, "col": 0, "message": ""}
 
-
 def _is_semantic_label(lbl: str) -> bool:
     t = _tolower(lbl)
     return (
@@ -324,7 +315,6 @@ def _is_semantic_label(lbl: str) -> bool:
         or ("symbol" in t)
     )
 
-
 def _is_syntax_label(lbl: str) -> bool:
     t = _tolower(lbl)
     return (
@@ -334,7 +324,6 @@ def _is_syntax_label(lbl: str) -> bool:
         or ("lexer" in t)
         or ("parser" in t)
     )
-
 
 def _collect_diagnostics(
     res: Optional[Dict[str, Any]],
@@ -424,7 +413,6 @@ def _collect_diagnostics(
 
     return {"lexsyn": lexsyn, "sem": sem}
 
-
 def _ace_annotations_from_diags(
     lexsyn: List[Dict[str, Any]], sem: List[Dict[str, Any]]
 ) -> List[Dict[str, Any]]:
@@ -454,7 +442,6 @@ def _ace_annotations_from_diags(
         )
         i += 1
     return anns
-
 
 def _cursor_from_response(resp: Dict[str, Any]) -> Optional[Dict[str, int]]:
     cur = resp.get("cursor", None)
@@ -495,7 +482,6 @@ def _cursor_from_response(resp: Dict[str, Any]) -> Optional[Dict[str, int]]:
         return {"row": int(r), "column": int(c)}
     return None
 
-
 def _extract_editor_text(resp: Dict[str, Any], default_text: str) -> str:
     keys = ["text", "content", "value", "code"]
     i = 0
@@ -505,7 +491,6 @@ def _extract_editor_text(resp: Dict[str, Any], default_text: str) -> str:
             return resp[k]
         i += 1
     return default_text
-
 
 def _is_empty_event(resp: Dict[str, Any]) -> bool:
     textlike = ["text", "content", "value", "code"]
@@ -523,6 +508,10 @@ def _is_empty_event(resp: Dict[str, Any]) -> bool:
             return False
     return True
 
+# ------------- FLAGS CONSOLIDADOS (temprano para pre-análisis) -------------
+# Si aún no existen los toggles del panel derecho, toma los de la sidebar.
+use_auto_flag = st.session_state.get("__aa", auto_analyze_sidebar)
+hide_builtins = st.session_state.get("__hb", hide_builtins_sidebar)
 
 # -----------------------------
 # Layout superior: editor + métricas
@@ -536,7 +525,7 @@ with left:
 
     # Pre‑análisis para anotaciones en el editor (cuando auto)
     pending_result: Optional[Dict[str, Any]] = None
-    if auto_analyze_sidebar:
+    if use_auto_flag:
         try:
             pending_result = analyze_internal(
                 st.session_state.code,
@@ -565,10 +554,12 @@ with left:
             "useSoftTabs": True,
             "minLines": 18,
             "showPrintMargin": False,
-            "annotations": annotations,
-            "errors": annotations,
+            # No duplicamos 'annotations' aquí; la añadimos según el sabor
         }
+
+        # Render del editor (dos sabores)
         try:
+            # Sabor moderno que acepta 'annotations' como kwarg
             ce_resp = code_editor(
                 st.session_state.code,
                 lang="text",
@@ -580,6 +571,8 @@ with left:
                 annotations=annotations,
             )
         except TypeError:
+            # Sabor antiguo: inyectamos annotations dentro de 'options'
+            editor_options["annotations"] = annotations
             ce_resp = code_editor(
                 st.session_state.code,
                 lang="text",
@@ -590,19 +583,42 @@ with left:
                 options=editor_options,
             )
 
-        if isinstance(ce_resp, dict) and (not _is_empty_event(ce_resp)):
-            # 1) Buffer
-            new_code = _extract_editor_text(ce_resp, st.session_state.code)
-            if (new_code is not None) and (new_code != st.session_state.code):
-                st.session_state.code = new_code
-            # 2) Cursor
+        # --------- SINCRONIZACIÓN ROBUSTA DEL TEXTO ---------
+        def _read_text_from(resp: Any) -> Optional[str]:
+            if isinstance(resp, dict):
+                for k in ("text", "content", "value", "code"):
+                    v = resp.get(k, None)
+                    if isinstance(v, str):
+                        return v
+            return None
+
+        # 1) Intento directo desde la respuesta del componente
+        txt = _read_text_from(ce_resp)
+
+        # 2) Fallback: muchos componentes escriben su estado bajo la misma 'key'
+        if txt is None:
+            raw_widget_state = st.session_state.get(editor_key, None)
+            txt = _read_text_from(raw_widget_state)
+
+        # 3) Si obtuvimos texto, lo llevamos SIEMPRE a session_state.code
+        if isinstance(txt, str) and txt != st.session_state.code:
+            st.session_state.code = txt
+
+        # --------- CURSOR ---------
+        cur = None
+        if isinstance(ce_resp, dict):
             cur = _cursor_from_response(ce_resp)
-            if cur is not None:
-                st.session_state.cursor = cur
-            # 3) Debug opcional
-            if editor_event_debug:
-                with st.expander("Evento crudo del editor"):
-                    st.write(ce_resp)
+        if cur is None:
+            ws = st.session_state.get(editor_key, None)
+            if isinstance(ws, dict):
+                cur = _cursor_from_response(ws)
+        if cur is not None:
+            st.session_state.cursor = cur
+
+        # --------- Depuración opcional ---------
+        if editor_event_debug and isinstance(ce_resp, dict):
+            with st.expander("Evento crudo del editor"):
+                st.write(ce_resp)
     else:
         st.text_area(
             "Fuente Compiscript", key="code", height=360, label_visibility="collapsed"
@@ -665,13 +681,13 @@ with right:
     st.write("Opciones rápidas")
     st.checkbox(
         "Analizar automáticamente",
-        value=auto_analyze_sidebar,
+        value=use_auto_flag,
         key="__aa",
         help="Refleja el estado de la barra lateral",
     )
     st.checkbox(
         "Ocultar built‑ins",
-        value=hide_builtins_sidebar,
+        value=hide_builtins,
         key="__hb",
         help="No mostrar funciones built‑in como 'print'",
     )
@@ -684,6 +700,20 @@ with right:
 # Flags consolidados (usar SIEMPRE el estado del panel derecho si existe)
 use_auto_flag = st.session_state.get("__aa", auto_analyze_sidebar)
 hide_builtins = st.session_state.get("__hb", hide_builtins_sidebar)
+
+# -----------------------------
+# Sincronización extra antes de analizar (cinturón y tirantes)
+# -----------------------------
+# Asegura que 'Analizar ahora' use el texto más reciente aunque el evento del editor no lo haya traído en esta iteración
+if HAS_CODE_EDITOR:
+    editor_key = f"code_editor_{st.session_state.editor_nonce}"
+    raw_widget_state = st.session_state.get(editor_key, None)
+    if isinstance(raw_widget_state, dict):
+        for k in ("text", "content", "value", "code"):
+            v = raw_widget_state.get(k, None)
+            if isinstance(v, str) and v != st.session_state.code:
+                st.session_state.code = v
+                break
 
 # -----------------------------
 # Análisis (AST / símbolos / etc.)
