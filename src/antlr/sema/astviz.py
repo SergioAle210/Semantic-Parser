@@ -46,27 +46,27 @@ class DotBuilder:
         # Etiquetas especiales primero
         if name == "FunctionDecl":
             ret = node.ret_ann if node.ret_ann is not None else "void"
-            return "Function\\n" + node.name + " : " + ret
+            return "Function\n" + node.name + " : " + ret
         if name == "Param":
             return (
-                "Param\\n"
+                "Param\n"
                 + (node.name or "")
                 + ((" : " + node.type_ann) if node.type_ann else "")
             )
         if name == "ClassDecl":
             if getattr(node, "base_name", None):
-                return "Class\\n" + node.name + " : " + node.base_name
-            return "Class\\n" + node.name
+                return "Class\n" + node.name + " : " + node.base_name
+            return "Class\n" + node.name
         if name == "Foreach":
-            return "Foreach\\n" + node.var_name
+            return "Foreach\n" + node.var_name
 
         # genérico (fallbacks si el nodo no es de los casos especiales)
         if hasattr(node, "op"):
-            return name + "\\n" + node.op
+            return name + "\n" + node.op
         if hasattr(node, "name"):
-            return name + "\\n" + node.name
+            return name + "\n" + node.name
         if hasattr(node, "kind"):
-            return name + "\\n" + node.kind
+            return name + "\n" + node.kind
         return name
 
     # enumera los hijos y sus etiquetas de arista según el tipo de nodo
