@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 import streamlit as st
 import time
 
-# --- Rutas ---
+# Rutas 
 ROOT = Path(__file__).resolve().parents[0]
 SRC = ROOT / "src"
 if str(SRC) not in sys.argv and str(SRC) not in sys.path:
@@ -19,13 +19,11 @@ if str(TOOLS) not in sys.argv and str(TOOLS) not in sys.path:
 
 from analysis_core import analyze_internal, suggest_fixes, hover_at, format_code  # noqa
 
-# -----------------------------
 # Estilos y estado base
-# -----------------------------
 st.set_page_config(page_title="VSCompi+", layout="wide")
 
 if "editor_nonce" not in st.session_state:
-    st.session_state.editor_nonce = 0  # por si futuras acciones quieren re‑montar el editor
+    st.session_state.editor_nonce = 0 
 if "code" not in st.session_state:
     st.session_state.code = 'function main(): integer { print("Hola"); return 0; }'
 if "last_sample" not in st.session_state:
@@ -90,9 +88,7 @@ st.markdown(
 st.markdown('<div class="title">VSCompi+</div>', unsafe_allow_html=True)
 st.caption("IDE ligera para Compiscript — diagnósticos, AST, símbolos, quick‑fixes y hover")
 
-# -----------------------------
 # Sidebar: selector de archivos (tests/ y examples/) + toggles
-# -----------------------------
 tests_dir = ROOT / "tests"
 examples_dir = ROOT / "examples"
 
@@ -134,9 +130,7 @@ if sel_sample != st.session_state.last_sample:
     except Exception as ex:
         st.sidebar.error("No se pudo cargar: " + str(ex))
 
-# -----------------------------
 # Helpers mínimos
-# -----------------------------
 def _parse_sem_line(msg: str):
     if (len(msg) >= 4) and (msg[0] == "["):
         i = 1
@@ -257,9 +251,7 @@ def _join_params(plist: List[Dict[str, Any]]) -> str:
         parts.append(f"{nm}:{tp}")
     return ", ".join(parts)
 
-# -----------------------------
 # Layout superior: Editor + Panel
-# -----------------------------
 left, right = st.columns([1.1, 0.9])
 
 with left:
@@ -305,9 +297,7 @@ with right:
 use_auto_flag = st.session_state.get("__aa", auto_analyze)
 hide_builtins = st.session_state.get("__hb", hide_builtins)
 
-# -----------------------------
 # Análisis (AST / símbolos / etc.)
-# -----------------------------
 result: Optional[Dict[str, Any]] = None
 do_analyze = bool(run_click) or bool(use_auto_flag)
 
@@ -322,9 +312,7 @@ if do_analyze:
     except Exception as ex:
         st.error("Error de análisis: " + str(ex))
 
-# -----------------------------
 # Resultados
-# -----------------------------
 lexsyn: List[Dict[str, Any]] = []
 sem: List[Dict[str, Any]] = []
 symbols: Dict[str, Any] = {}
@@ -371,7 +359,7 @@ if result is not None:
     if show_tokens:   tabs_labels.append("Tokens")
     tabs = st.tabs(tabs_labels)
 
-    # --- Diagnósticos ---
+    # Diagnósticos
     t = 0
     with tabs[t]:
         st.subheader("Errores léxicos/sintácticos")
@@ -401,7 +389,7 @@ if result is not None:
                     st.error("Hover falló: " + str(ex))
     t += 1
 
-    # --- Tabla de símbolos ---
+    # Tabla de símbolos
     if show_symbols:
         with tabs[t]:
             st.subheader("Tabla de Símbolos (global)")
@@ -468,7 +456,7 @@ if result is not None:
                         st.dataframe(c.get("inherited", []), use_container_width=True)
     t += 1 if show_symbols else 0
 
-    # --- AST ---
+    # AST
     if show_ast:
         with tabs[t]:
             st.subheader("Árbol sintáctico (AST)")
@@ -483,7 +471,7 @@ if result is not None:
                 st.info("AST no solicitado / vacío.")
     t += 1 if show_ast else 0
 
-    # --- Quick‑fixes ---
+    # Quick‑fixes
     if show_quickfix:
         with tabs[t]:
             st.subheader("Sugerencias (quick‑fixes)")
@@ -498,7 +486,7 @@ if result is not None:
                 st.dataframe(fixes, use_container_width=True)
     t += 1 if show_quickfix else 0
 
-    # --- Tokens ---
+    # Tokens
     if show_tokens:
         with tabs[t]:
             st.subheader("Tokens (depuración)")

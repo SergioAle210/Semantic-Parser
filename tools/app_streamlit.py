@@ -20,9 +20,7 @@ if str(TOOLS) not in sys.path:
 
 from analysis_core import analyze_internal, suggest_fixes, hover_at, format_code
 
-# -------------------------------------------------
 # Editor Ace vía streamlit-code-editor (dos sabores)
-# -------------------------------------------------
 HAS_CODE_EDITOR = False
 CODE_EDITOR_FLAVOR = None
 try:
@@ -38,9 +36,7 @@ except Exception:
         HAS_CODE_EDITOR = False
         CODE_EDITOR_FLAVOR = None
 
-# -----------------------------
 # Estilos y estado base
-# -----------------------------
 st.set_page_config(page_title="VSCompi+", layout="wide")
 
 # Estado UI inicial
@@ -114,9 +110,7 @@ st.caption(
     "IDE ligera para Compiscript — diagnósticos, AST, símbolos, quick‑fixes y hover"
 )
 
-# -----------------------------
 # Sidebar: ejemplos y toggles
-# -----------------------------
 examples_dir = ROOT / "examples"
 example_files: List[str] = []
 if examples_dir.exists():
@@ -139,9 +133,7 @@ editor_event_debug = st.sidebar.checkbox(
     "Depurar evento del editor (mostrar dict)", value=False
 )
 
-# -----------------------------
 # Estado editor
-# -----------------------------
 if "code" not in st.session_state:
     st.session_state.code = 'function main(): integer { print("Hola"); return 0; }'
 if "last_example" not in st.session_state:
@@ -162,9 +154,7 @@ if sel_example != st.session_state.last_example:
     except Exception as ex:
         st.sidebar.error("No se pudo cargar el ejemplo: " + str(ex))
 
-# -----------------------------
 # Helpers (sin regex/strip)
-# -----------------------------
 def _parse_sem_line(msg: str):
     if (len(msg) >= 4) and (msg[0] == "["):
         i = 1
@@ -210,7 +200,7 @@ def _join_params(plist: List[Dict[str, Any]]) -> str:
         j += 1
     return s
 
-# --------- utilidades de normalización (sin regex/strip) ----------
+# utilidades de normalización (sin regex/strip)
 def _tolower(s: str) -> str:
     out = []
     i = 0
@@ -508,14 +498,10 @@ def _is_empty_event(resp: Dict[str, Any]) -> bool:
             return False
     return True
 
-# ------------- FLAGS CONSOLIDADOS (temprano para pre-análisis) -------------
-# Si aún no existen los toggles del panel derecho, toma los de la sidebar.
 use_auto_flag = st.session_state.get("__aa", auto_analyze_sidebar)
 hide_builtins = st.session_state.get("__hb", hide_builtins_sidebar)
 
-# -----------------------------
 # Layout superior: editor + métricas
-# -----------------------------
 left, right = st.columns([1.1, 0.9])
 
 run_click = False
@@ -583,7 +569,7 @@ with left:
                 options=editor_options,
             )
 
-        # --------- SINCRONIZACIÓN ROBUSTA DEL TEXTO ---------
+        # SINCRONIZACIÓN ROBUSTA DEL TEXTO
         def _read_text_from(resp: Any) -> Optional[str]:
             if isinstance(resp, dict):
                 for k in ("text", "content", "value", "code"):
@@ -604,7 +590,7 @@ with left:
         if isinstance(txt, str) and txt != st.session_state.code:
             st.session_state.code = txt
 
-        # --------- CURSOR ---------
+        # CURSOR
         cur = None
         if isinstance(ce_resp, dict):
             cur = _cursor_from_response(ce_resp)
@@ -615,7 +601,6 @@ with left:
         if cur is not None:
             st.session_state.cursor = cur
 
-        # --------- Depuración opcional ---------
         if editor_event_debug and isinstance(ce_resp, dict):
             with st.expander("Evento crudo del editor"):
                 st.write(ce_resp)
@@ -701,10 +686,7 @@ with right:
 use_auto_flag = st.session_state.get("__aa", auto_analyze_sidebar)
 hide_builtins = st.session_state.get("__hb", hide_builtins_sidebar)
 
-# -----------------------------
 # Sincronización extra antes de analizar (cinturón y tirantes)
-# -----------------------------
-# Asegura que 'Analizar ahora' use el texto más reciente aunque el evento del editor no lo haya traído en esta iteración
 if HAS_CODE_EDITOR:
     editor_key = f"code_editor_{st.session_state.editor_nonce}"
     raw_widget_state = st.session_state.get(editor_key, None)
@@ -715,9 +697,7 @@ if HAS_CODE_EDITOR:
                 st.session_state.code = v
                 break
 
-# -----------------------------
 # Análisis (AST / símbolos / etc.)
-# -----------------------------
 result: Optional[Dict[str, Any]] = None
 do_analyze = bool(run_click) or bool(use_auto_flag)
 
@@ -732,9 +712,7 @@ if do_analyze:
     except Exception as ex:
         st.error("Error de análisis: " + str(ex))
 
-# -----------------------------
 # Resultados
-# -----------------------------
 lexsyn: List[Dict[str, Any]] = []
 sem: List[Dict[str, Any]] = []
 symbols: Dict[str, Any] = {}
@@ -796,7 +774,7 @@ if result is not None:
         tabs_labels.append("Tokens")
     tabs = st.tabs(tabs_labels)
 
-    # --- Diagnósticos ---
+    # Diagnósticos
     t = 0
     with tabs[t]:
         st.subheader("Errores léxicos/sintácticos")
@@ -831,7 +809,7 @@ if result is not None:
                     st.error("Hover falló: " + str(ex))
     t += 1
 
-    # --- Tabla de símbolos ---
+    # Tabla de símbolos
     if show_symbols:
         with tabs[t]:
             st.subheader("Tabla de Símbolos (global)")
@@ -911,7 +889,7 @@ if result is not None:
                 i += 1
     t += 1 if show_symbols else 0
 
-    # --- AST ---
+    # AST 
     if show_ast:
         with tabs[t]:
             st.subheader("Árbol sintáctico (AST)")
@@ -931,7 +909,7 @@ if result is not None:
                 st.info("AST no solicitado / vacío.")
     t += 1 if show_ast else 0
 
-    # --- Quick‑fixes ---
+    # Quick‑fixes
     if show_quickfix:
         with tabs[t]:
             st.subheader("Sugerencias (quick‑fixes)")
@@ -961,15 +939,13 @@ if result is not None:
                 st.dataframe(fixes, use_container_width=True)
     t += 1 if show_quickfix else 0
 
-    # --- Tokens ---
+    # Tokens
     if show_tokens:
         with tabs[t]:
             st.subheader("Tokens (depuración)")
             st.json(result.get("tokens", []) or [])
 
-# -----------------------------
-# Auto‑refresh del cursor (AL FINAL)
-# -----------------------------
+# Auto‑refresh del cursor
 if st.session_state.live_cursor and HAS_CODE_EDITOR and (not run_click):
     time.sleep(0.2)
     try:
