@@ -329,6 +329,58 @@ class Checker:
         except Exception:
             pass
 
+    def _is_void_type(self, t):
+        # Evita depender de helpers externos; str(t) suele ser "void"
+        return str(t) == "void"
+
+    def _block_or_stmt_returns(self, n) -> bool:
+        if n is None:
+            return False
+        if n.__class__.__name__ == "Block":
+            return self._block_guarantees_return(n)
+        return self._stmt_guarantees_return(n)
+
+    def _block_guarantees_return(self, blk) -> bool:
+        # Un bloque garantiza return si alguna sentencia lo garantiza
+        i = 0
+        while i < len(blk.statements):
+            if self._stmt_guarantees_return(blk.statements[i]):
+                return True
+            i += 1
+        return False
+
+    def _stmt_guarantees_return(self, s) -> bool:
+        k = s.__class__.__name__
+        if k == "Return":
+            return True
+        if k == "Block":
+            return self._block_guarantees_return(s)
+        if k == "If":
+            then_ok = self._block_or_stmt_returns(getattr(s, "then_blk", None))
+            else_blk = getattr(s, "else_blk", None)
+            else_ok = self._block_or_stmt_returns(else_blk) if else_blk is not None else False
+            return then_ok and else_ok
+        if k == "TryCatch":
+            # Conservador: exige return en try y en catch
+            return (self._block_or_stmt_returns(getattr(s, "try_block", None)) and
+                    self._block_or_stmt_returns(getattr(s, "catch_block", None)))
+        if k == "Switch":
+            # Conservador: exige default y que todos los cases retornen
+            cases = getattr(s, "cases", []) or []
+            all_cases = True
+            i = 0
+            while i < len(cases):
+                if not self._block_or_stmt_returns(cases[i].block):
+                    all_cases = False
+                    break
+                i += 1
+            default_blk = getattr(s, "default_block", None)
+            return (default_blk is not None and
+                    all_cases and
+                    self._block_or_stmt_returns(default_blk))
+        # Bucles y demás sentencias no garantizan retorno (conservador)
+        return False
+
     # paso 2 chequeo
     # despacha a visit_* según el tipo de nodo
     def visit(self, node):
@@ -479,6 +531,12 @@ class Checker:
         if body is not None:
             self.visit(body)
         self._dead_pop()
+
+        if not self._is_void_type(rt):
+            if body is None or not self._block_or_stmt_returns(body):
+                self.err(n.loc, "Función '" + n.name + "' debe retornar un tipo de dato "
+                        + str(rt) + " en todos los caminos")
+                
         self.env.pop()
         return None
 
@@ -562,6 +620,7 @@ class Checker:
                     self.visit(m.body)
                     self._dead_pop()
                     self.env.pop()
+
                 else:
                     meth = self.env.class_lookup_member(class_sym, m.name)
                     if meth is None or meth.kind != "func":
@@ -591,6 +650,11 @@ class Checker:
                     self.visit(m.body)
                     self._dead_pop()
                     self.env.pop()
+
+                    if not self._is_void_type(meth.return_type):
+                        if getattr(m, "body", None) is None or not self._block_or_stmt_returns(m.body):
+                            self.err(m.loc, "Método '" + m.name + "' debe retornar un tipo de dato "
+                                    + str(meth.return_type) + " en todos los caminos")
             i += 1
 
         if getattr(class_sym, "base_name", None):
