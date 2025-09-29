@@ -5,38 +5,21 @@ from typing import Dict, List, Optional, Tuple
 from compiscript.codegen.temp_pool import TempPool
 from compiscript.codegen.frame import Frame
 from compiscript.ir.tac import (
-    IRProgram,
-    IRFunction,
-    Instr,
-    Operand,
-    Temp,
-    Local,
-    Param,
-    ConstInt,
-    ConstStr,
-    Label,
-    Jump,
-    CJump,
-    Move,
-    BinOp,
-    UnaryOp,
-    Cmp,
-    Call,
-    Return,
+    IRProgram, IRFunction,
+    Instr, Operand,
+    Temp, Local, Param, ConstInt, ConstStr,
+    Label, Jump, CJump, Move, BinOp, UnaryOp, Cmp, Call, Return
 )
-
 
 # Utilidad para nombres de etiquetas
 class LabelGen:
     def __init__(self, prefix: str = "L"):
         self.prefix = prefix
         self.n = 0
-
     def new(self) -> str:
         s = f"{self.prefix}{self.n}"
         self.n += 1
         return s
-
 
 class IRGen:
     """
@@ -44,7 +27,6 @@ class IRGen:
     Cubre Program, FunctionDecl, Block, VarDecl/ConstDecl, Assign, If, While, Return,
     ExprStmt, Identifier, Literal, Unary, Binary, Call.
     """
-
     def __init__(self):
         self.prog = IRProgram()
         self.tpool = TempPool()
@@ -57,14 +39,11 @@ class IRGen:
     # ------------- helpers de scopes -------------
     def _push_scope(self):
         self.scopes.append({})
-
     def _pop_scope(self):
         self.scopes.pop()
-
     def _bind(self, name: str, op: Operand):
         assert self.scopes, "No hay scope activo"
         self.scopes[-1][name] = op
-
     def _lookup(self, name: str) -> Optional[Operand]:
         for m in reversed(self.scopes):
             if name in m:
@@ -95,17 +74,8 @@ class IRGen:
             return m(n)
         # nodos que no soportamos aún:
         unsupported = {
-            "ClassDecl",
-            "MemberAccess",
-            "IndexAccess",
-            "ArrayLiteral",
-            "Foreach",
-            "Switch",
-            "SwitchCase",
-            "TryCatch",
-            "This",
-            "For",
-            "Ternary",
+            "ClassDecl","MemberAccess","IndexAccess","ArrayLiteral",
+            "Foreach","Switch","SwitchCase","TryCatch","This","For","Ternary"
         }
         if k in unsupported:
             raise NotImplementedError(f"IRGen: nodo {k} aún no soportado")
@@ -193,7 +163,7 @@ class IRGen:
 
     def _visit_If(self, n):
         L_then = self.lgen.new()
-        L_end = self.lgen.new()
+        L_end  = self.lgen.new()
         if getattr(n, "else_blk", None) is None:
             # if (cond) then { ... }
             self._emit_cond_jump(n.cond, L_then, L_end)
@@ -213,7 +183,7 @@ class IRGen:
     def _visit_While(self, n):
         L_cond = self.lgen.new()
         L_body = self.lgen.new()
-        L_end = self.lgen.new()
+        L_end  = self.lgen.new()
         self._emit(Label(L_cond))
         self._emit_cond_jump(n.cond, L_body, L_end)
         self._emit(Label(L_body))
@@ -263,19 +233,19 @@ class IRGen:
 
     def _expr_Binary(self, e) -> Operand:
         # aritméticos y relacionales
-        if e.op in ("+", "-", "*", "/", "%"):
+        if e.op in ("+","-","*","/","%"):
             a = self._eval_expr(e.left)
             b = self._eval_expr(e.right)
             dst = Temp(self.tpool.new())
             self._emit(BinOp(e.op, dst, a, b))
             return dst
-        if e.op in ("==", "!=", "<", "<=", ">", ">="):
+        if e.op in ("==","!=", "<","<=",">",">="):
             a = self._eval_expr(e.left)
             b = self._eval_expr(e.right)
             dst = Temp(self.tpool.new())
             self._emit(Cmp(e.op, dst, a, b))
             return dst
-        if e.op in ("&&", "||"):
+        if e.op in ("&&","||"):
             # Short-circuit a boolean 0/1
             L_true = self.lgen.new()
             L_false = self.lgen.new()
@@ -309,10 +279,7 @@ class IRGen:
         # wrapper pequeño: !(expr)
         class _Not:
             __slots__ = ("expr",)
-
-            def __init__(self, expr):
-                self.expr = expr
-
+            def __init__(self, expr): self.expr = expr
         return _Not(expr)
 
     def _expr_Call(self, e) -> Operand:
@@ -341,14 +308,7 @@ class IRGen:
             self._emit(CJump("==", val, ConstInt(0), L_true, L_false))
             return
         # relacionales directos
-        if cond_expr.__class__.__name__ == "Binary" and cond_expr.op in (
-            "==",
-            "!=",
-            "<",
-            "<=",
-            ">",
-            ">=",
-        ):
+        if cond_expr.__class__.__name__ == "Binary" and cond_expr.op in ("==","!=", "<","<=",">",">="):
             a = self._eval_expr(cond_expr.left)
             b = self._eval_expr(cond_expr.right)
             self._emit(CJump(cond_expr.op, a, b, L_true, L_false))
