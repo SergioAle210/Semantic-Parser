@@ -1,46 +1,19 @@
 # compiscript/ir/pretty.py
 from __future__ import annotations
-from typing import Iterable
-from .tac import TACProgram
-
-def pretty(program: TACProgram) -> str:
-    return str(program)
 from typing import List
 from compiscript.ir.tac import (
-    IRProgram,
-    IRFunction,
-    Instr,
-    Operand,
-    Label,
-    Jump,
-    CJump,
-    Move,
-    BinOp,
-    UnaryOp,
-    Cmp,
-    Call,
-    Return,
-    Temp,
-    Local,
-    Param,
-    ConstInt,
-    ConstStr,
+    IRProgram, IRFunction, Instr, Operand,
+    Label, Jump, CJump, Move, BinOp, UnaryOp, Cmp, Call, Return,
+    Temp, Local, Param, ConstInt, ConstStr
 )
 
-
 def _opnd(o: Operand) -> str:
-    if isinstance(o, Temp):
-        return f"%{o.name}"
-    if isinstance(o, Local):
-        return f"${o.name}"
-    if isinstance(o, Param):
-        return f"@{o.name}"
-    if isinstance(o, ConstInt):
-        return str(o.value)
-    if isinstance(o, ConstStr):
-        return f"&{o.label}"
+    if isinstance(o, Temp):     return f"%{o.name}"
+    if isinstance(o, Local):    return f"${o.name}"
+    if isinstance(o, Param):    return f"@{o.name}"
+    if isinstance(o, ConstInt): return str(o.value)
+    if isinstance(o, ConstStr): return f"&{o.label}"
     return str(o)
-
 
 def _ins(i: Instr) -> str:
     if isinstance(i, Label):
@@ -48,9 +21,7 @@ def _ins(i: Instr) -> str:
     if isinstance(i, Jump):
         return f"  goto {i.target}"
     if isinstance(i, CJump):
-        return (
-            f"  if {_opnd(i.a)} {i.op} {_opnd(i.b)} goto {i.if_true} else {i.if_false}"
-        )
+        return f"  if {_opnd(i.a)} {i.op} {_opnd(i.b)} goto {i.if_true} else {i.if_false}"
     if isinstance(i, Move):
         return f"  {_opnd(i.dst)} = {_opnd(i.src)}"
     if isinstance(i, BinOp):
@@ -70,7 +41,6 @@ def _ins(i: Instr) -> str:
             return "  return"
         return f"  return {_opnd(i.value)}"
     return f"  ; {i}"
-
 
 def format_ir(prog: IRProgram) -> str:
     out: List[str] = []
@@ -95,4 +65,3 @@ def format_ir(prog: IRProgram) -> str:
     if prog.entry:
         out.append(f"; entry: {prog.entry}")
     return "\n".join(out)
-
