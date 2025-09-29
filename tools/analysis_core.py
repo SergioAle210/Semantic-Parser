@@ -393,6 +393,7 @@ def _class_members_from_symbols(symbols: Dict[str, Any], cls_name: str) -> List[
     return []
 
 
+# Quick-Fixes sin regex
 def suggest_fixes(
     code: str, sem_errors: List[str], symbols: Dict[str, Any]
 ) -> List[Dict[str, Any]]:
@@ -555,11 +556,7 @@ def suggest_fixes(
     return fixes
 
 
-# =========================================================
-#                Formateador sin strip/regex
-# =========================================================
-
-
+# Formateador sin strip/regex
 def format_code(code: str) -> str:
     lines = _split_lines_manual(code)
     IND = "  "  # 2 espacios
