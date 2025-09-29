@@ -4,36 +4,20 @@ from typing import Dict, List, Optional, Tuple
 
 from compiscript.codegen.frame import Frame
 from compiscript.ir.tac import (
-    IRProgram,
-    IRFunction,
-    Instr,
-    Operand,
-    Label,
-    Jump,
-    CJump,
-    Move,
-    BinOp,
-    UnaryOp,
-    Cmp,
-    Call,
-    Return,
-    Temp,
-    Local,
-    Param,
-    ConstInt,
-    ConstStr,
+    IRProgram, IRFunction, Instr, Operand,
+    Label, Jump, CJump, Move, BinOp, UnaryOp, Cmp, Call, Return,
+    Temp, Local, Param, ConstInt, ConstStr
 )
 
 # Mapeo de cond a jcc
 _JCC = {
     "==": "je",
     "!=": "jne",
-    "<": "jl",
+    "<":  "jl",
     "<=": "jle",
-    ">": "jg",
+    ">":  "jg",
     ">=": "jge",
 }
-
 
 class X86Naive:
     """
@@ -43,7 +27,6 @@ class X86Naive:
       - caller limpia el stack de argumentos
     Emite 'printf' para print enteros/strings.
     """
-
     def __init__(self):
         self.lines: List[str] = []
         # mapeo de temporales a slots de stack (como locales)
@@ -64,8 +47,8 @@ class X86Naive:
 
     def _emit_data(self, prog: IRProgram):
         # formatos para print
-        self.lines.append('fmt_int db "%d", 10, 0')
-        self.lines.append('fmt_str db "%s", 10, 0')
+        self.lines.append("fmt_int db \"%d\", 10, 0")
+        self.lines.append("fmt_str db \"%s\", 10, 0")
         # strings del programa
         for lab, b in prog.strings.items():
             self.lines.append(f"{lab} db " + ", ".join(str(x) for x in b))
@@ -79,11 +62,8 @@ class X86Naive:
             self._emit_function(fn, is_entry=(prog.entry == fname))
 
     # ---------------- utils ----------------
-    def _w(self, s: str):
-        self.lines.append(s)
-
-    def _lbl(self, s: str):
-        self._w(f"{s}:")
+    def _w(self, s: str): self.lines.append(s)
+    def _lbl(self, s: str): self._w(f"{s}:")
 
     # obtiene dirección (operando) en ASM
     def _mem_operand(self, frame: Frame, op: Operand) -> str:
@@ -137,21 +117,15 @@ class X86Naive:
         for ins in fn.body:
             if isinstance(ins, (Move, BinOp, UnaryOp, Cmp, Call, Return, CJump)):
                 ops = []
-                if isinstance(ins, Move):
-                    ops = [ins.dst, ins.src]
-                if isinstance(ins, BinOp):
-                    ops = [ins.dst, ins.a, ins.b]
-                if isinstance(ins, UnaryOp):
-                    ops = [ins.dst, ins.a]
-                if isinstance(ins, Cmp):
-                    ops = [ins.dst, ins.a, ins.b]
+                if isinstance(ins, Move):      ops = [ins.dst, ins.src]
+                if isinstance(ins, BinOp):     ops = [ins.dst, ins.a, ins.b]
+                if isinstance(ins, UnaryOp):   ops = [ins.dst, ins.a]
+                if isinstance(ins, Cmp):       ops = [ins.dst, ins.a, ins.b]
                 if isinstance(ins, Call):
-                    if ins.dst is not None:
-                        ops.append(ins.dst)
+                    if ins.dst is not None: ops.append(ins.dst)
                     ops += list(ins.args)
                 if isinstance(ins, Return):
-                    if ins.value is not None:
-                        ops.append(ins.value)
+                    if ins.value is not None: ops.append(ins.value)
                 if isinstance(ins, CJump):
                     ops = [ins.a, ins.b]
                 for o in ops:
@@ -209,17 +183,14 @@ class X86Naive:
         if isinstance(ins, BinOp):
             # dst = a op b
             self._load_eax(frame, ins.a)
-            if ins.op in ("+", "-", "*"):
+            if ins.op in ("+","-","*"):
                 self._load_ebx(frame, ins.b)
-                if ins.op == "+":
-                    self._w("    add eax, ebx")
-                if ins.op == "-":
-                    self._w("    sub eax, ebx")
-                if ins.op == "*":
-                    self._w("    imul eax, ebx")
+                if ins.op == "+": self._w("    add eax, ebx")
+                if ins.op == "-": self._w("    sub eax, ebx")
+                if ins.op == "*": self._w("    imul eax, ebx")
                 self._store_from_eax(frame, ins.dst)
                 return
-            if ins.op in ("/", "%"):
+            if ins.op in ("/","%"):
                 # EAX = a; EDX:EAX / ebx
                 self._load_ebx(frame, ins.b)
                 self._w("    cdq")
@@ -227,7 +198,7 @@ class X86Naive:
                 if ins.op == "/":
                     self._store_from_eax(frame, ins.dst)  # cociente en eax
                 else:
-                    self._w("    mov eax, edx")  # residuo en edx
+                    self._w("    mov eax, edx")          # residuo en edx
                     self._store_from_eax(frame, ins.dst)
                 return
             raise RuntimeError(f"BinOp no soportado: {ins.op}")
@@ -258,7 +229,7 @@ class X86Naive:
             if not jcc:
                 raise RuntimeError(f"Cmp op desconocido: {ins.op}")
             L_true = f"cmp_true_{id(ins)}"
-            L_end = f"cmp_end_{id(ins)}"
+            L_end  = f"cmp_end_{id(ins)}"
             self._w(f"    {jcc} {L_true}")
             # false -> 0
             self._w("    mov eax, 0")
@@ -319,3 +290,4 @@ class X86Naive:
 
         # fallback:
         self._w(f"    ; instr desconocida {ins}")
+
