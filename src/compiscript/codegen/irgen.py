@@ -8,7 +8,8 @@ from compiscript.ir.tac import (
     IRProgram, IRFunction,
     Instr, Operand,
     Temp, Local, Param, ConstInt, ConstStr,
-    Label, Jump, CJump, Move, BinOp, UnaryOp, Cmp, Call, Return
+    Label, Jump, CJump, Move, BinOp, UnaryOp, Cmp, Call, Return,
+    Load, Store,
 )
 
 # Utilidad para nombres de etiquetas
@@ -21,36 +22,63 @@ class LabelGen:
         self.n += 1
         return s
 
+
 class IRGen:
     """
     Generador de IR desde el AST de tu proyecto.
-    Cubre Program, FunctionDecl, Block, VarDecl/ConstDecl, Assign, If, While, Return,
-    ExprStmt, Identifier, Literal, Unary, Binary, Call.
+    Ahora cubre:
+      - Program, FunctionDecl, Block
+      - VarDecl/ConstDecl, Assign
+      - If, While, Return, ExprStmt
+      - Binary, Unary, Identifier, Literal, Call
+      - ClassDecl (métodos y campos), This, MemberAccess (get/set)
+      - Switch/SwitchCase, Foreach (sobre ArrayLiteral), TryCatch (compila solo try)
     """
     def __init__(self):
         self.prog = IRProgram()
         self.tpool = TempPool()
         self.lgen = LabelGen()
+
         self.current_fn: Optional[IRFunction] = None
         self.frame: Optional[Frame] = None
+
         # pila de scopes {name: Operand(Local|Param)}
         self.scopes: List[Dict[str, Operand]] = []
+        # pila de tipos de variables {name: class_name or None}
+        self.type_scopes: List[Dict[str, Optional[str]]] = []
+
+        # info de clases
+        # class_name -> { field_name: offset_en_bytes }
+        self.class_field_off: Dict[str, Dict[str, int]] = {}
+        # (class_name, method_name) -> ir_name 'Class__method'
+        self.method_irname: Dict[Tuple[str, str], str] = {}
+        # clase activa (dentro de método)
+        self.cur_class: Optional[str] = None
 
     # ------------- helpers de scopes -------------
     def _push_scope(self):
         self.scopes.append({})
+        self.type_scopes.append({})
     def _pop_scope(self):
         self.scopes.pop()
+        self.type_scopes.pop()
     def _bind(self, name: str, op: Operand):
         assert self.scopes, "No hay scope activo"
         self.scopes[-1][name] = op
+    def _bind_type(self, name: str, cls: Optional[str]):
+        assert self.type_scopes, "No hay scope activo"
+        self.type_scopes[-1][name] = cls
     def _lookup(self, name: str) -> Optional[Operand]:
         for m in reversed(self.scopes):
             if name in m:
                 return m[name]
-        # Si no se encuentra, intentamos param por nombre
         if self.current_fn and name in self.current_fn.params:
             return Param(name)
+        return None
+    def _lookup_type(self, name: str) -> Optional[str]:
+        for m in reversed(self.type_scopes):
+            if name in m:
+                return m[name]
         return None
 
     # ------------- API principal -------------
@@ -72,14 +100,7 @@ class IRGen:
         m = getattr(self, f"_visit_{k}", None)
         if m is not None:
             return m(n)
-        # nodos que no soportamos aún:
-        unsupported = {
-            "ClassDecl","MemberAccess","IndexAccess","ArrayLiteral",
-            "Foreach","Switch","SwitchCase","TryCatch","This","For","Ternary"
-        }
-        if k in unsupported:
-            raise NotImplementedError(f"IRGen: nodo {k} aún no soportado")
-        raise NotImplementedError(f"IRGen: nodo desconocido {k}")
+        raise NotImplementedError(f"IRGen: nodo {k} aún no soportado")
 
     # ---------------- Program / FunctionDecl / Block ----------------
     def _visit_Program(self, n):
@@ -98,12 +119,16 @@ class IRGen:
 
         # prepara frame y scopes
         prev_fn, prev_frame = self.current_fn, self.frame
+        prev_class = self.cur_class
         self.current_fn, self.frame = fn, Frame(fname, params)
+        self.cur_class = None
+
         self.scopes.clear()
+        self.type_scopes.clear()
         self._push_scope()
-        # bind de parámetros en scope 0:
         for p in params:
             self._bind(p, Param(p))
+            self._bind_type(p, None)
 
         # cuerpo
         self._visit(n.body)
@@ -112,6 +137,7 @@ class IRGen:
         self._pop_scope()
         fn.frame = self.frame
         self.current_fn, self.frame = prev_fn, prev_frame
+        self.cur_class = prev_class
 
     def _visit_Block(self, n):
         self._push_scope()
@@ -130,10 +156,24 @@ class IRGen:
             self.current_fn.locals.append(name)
         loc = Local(name)
         self._bind(name, loc)
+        self._bind_type(name, None)
+
         # init
         if getattr(n, "init", None) is not None:
+            # Si es constructor Clase(...), rastrear el tipo
+            is_ctor = False
+            ctor_class: Optional[str] = None
+            if n.init.__class__.__name__ == "Call":
+                callee = n.init.callee
+                if callee.__class__.__name__ == "Identifier":
+                    cname = callee.name
+                    if cname in self.class_field_off:
+                        is_ctor = True
+                        ctor_class = cname
             val = self._eval_expr(n.init)
             self._emit(Move(loc, val))
+            if is_ctor and ctor_class:
+                self._bind_type(name, ctor_class)
 
     def _visit_ConstDecl(self, n):
         # tratamos const igual que local (solo IR); checker ya impide reasignación
@@ -141,18 +181,36 @@ class IRGen:
 
     # ---------------- statements ----------------
     def _visit_ExprStmt(self, n):
-        self._eval_expr(n.expr)  # si es call, se emite; si no, se ignora resultado
+        self._eval_expr(n.expr)
 
     def _visit_Assign(self, n):
-        # solo soportamos target = Identifier
         tgt = n.target
-        if tgt.__class__.__name__ != "Identifier":
-            raise NotImplementedError("Assign: solo Identifier como LHS por ahora")
-        op = self._lookup(tgt.name)
-        if op is None:
-            raise RuntimeError(f"Variable no encontrada: {tgt.name}")
-        val = self._eval_expr(n.value)
-        self._emit(Move(op, val))
+        k = tgt.__class__.__name__
+        if k == "Identifier":
+            op = self._lookup(tgt.name)
+            if op is None:
+                raise RuntimeError(f"Variable no encontrada: {tgt.name}")
+            # rastreo de tipo por asignación con constructor
+            ctor_class: Optional[str] = None
+            if n.value.__class__.__name__ == "Call":
+                callee = n.value.callee
+                if callee.__class__.__name__ == "Identifier":
+                    if callee.name in self.class_field_off:
+                        ctor_class = callee.name
+            val = self._eval_expr(n.value)
+            self._emit(Move(op, val))
+            if ctor_class is not None:
+                self._bind_type(tgt.name, ctor_class)
+            return
+
+        if k == "MemberAccess":
+            base_op, cls, field = self._resolve_member_target(tgt)
+            offset = self.class_field_off[cls][field]
+            src = self._eval_expr(n.value)
+            self._emit(Store(base_op, offset, src))
+            return
+
+        raise NotImplementedError("Assign: solo Identifier o MemberAccess como LHS por ahora")
 
     def _visit_Return(self, n):
         if getattr(n, "value", None) is None:
@@ -165,7 +223,6 @@ class IRGen:
         L_then = self.lgen.new()
         L_end  = self.lgen.new()
         if getattr(n, "else_blk", None) is None:
-            # if (cond) then { ... }
             self._emit_cond_jump(n.cond, L_then, L_end)
             self._emit(Label(L_then))
             self._visit(n.then_blk)
@@ -191,6 +248,132 @@ class IRGen:
         self._emit(Jump(L_cond))
         self._emit(Label(L_end))
 
+    def _visit_Switch(self, n):
+        disc = self._eval_expr(n.expr)
+        L_end = self.lgen.new()
+        cases = getattr(n, "cases", []) or []
+        has_default = getattr(n, "default_block", None) is not None
+        L_default = self.lgen.new() if has_default else L_end
+
+        # Salto a cada case
+        next_label = L_default
+        for idx, c in enumerate(cases):
+            L_case = self.lgen.new()
+            cv = self._eval_expr(c.expr)
+            # if disc == cv -> L_case else next (que será el siguiente compare o default)
+            L_next = self.lgen.new() if idx < len(cases)-1 else L_default
+            self._emit(CJump("==", disc, cv, L_case, L_next))
+            # preparar siguiente
+            next_label = L_next
+            self._emit(Label(L_case))
+            self._visit(c.block)
+            self._emit(Jump(L_end))
+            self._emit(Label(next_label))
+
+        if has_default:
+            self._emit(Label(L_default))
+            self._visit(n.default_block)
+        self._emit(Label(L_end))
+
+    def _visit_Foreach(self, n):
+        # Solo soportamos: foreach v in [e1, e2, ...] { body }
+        iterable = n.iterable
+        if iterable.__class__.__name__ != "ArrayLiteral":
+            raise NotImplementedError("foreach: por ahora solo ArrayLiteral")
+        var_name = n.var_name
+        # nuevo scope
+        self._push_scope()
+        self.frame.ensure_local(var_name)
+        if var_name not in self.current_fn.locals:
+            self.current_fn.locals.append(var_name)
+        loc = Local(var_name)
+        self._bind(var_name, loc)
+        self._bind_type(var_name, None)
+
+        i = 0
+        while i < len(iterable.elements):
+            val = self._eval_expr(iterable.elements[i])
+            self._emit(Move(loc, val))
+            self._visit(n.body)
+            i += 1
+
+        self._pop_scope()
+
+    def _visit_TryCatch(self, n):
+        # Sin runtime de excepciones: compilar solo el try
+        # Creamos el scope del catch (y variable) para coincidir con checker
+        self._push_scope()
+        # err_name es la variable del catch; la declaramos pero NO se usa
+        err_name = getattr(n, "err_name", None)
+        if err_name:
+            self.frame.ensure_local(err_name)
+            if err_name not in self.current_fn.locals:
+                self.current_fn.locals.append(err_name)
+            self._bind(err_name, Local(err_name))
+            self._bind_type(err_name, None)
+        self._visit(n.try_block)
+        self._pop_scope()
+
+    def _visit_ClassDecl(self, n):
+        cname = n.name
+        # 1) layout de campos (4 bytes por campo)
+        fields: List[str] = []
+        i = 0
+        while i < len(n.members):
+            m = n.members[i]
+            mk = m.__class__.__name__
+            if mk in ("VarDecl", "ConstDecl"):
+                fields.append(m.name)
+            i += 1
+        offmap: Dict[str, int] = {}
+        off = 0
+        for f in fields:
+            offmap[f] = off
+            off += 4
+        self.class_field_off[cname] = offmap
+
+        # 2) compilar métodos como funciones con primer param 'this'
+        i = 0
+        while i < len(n.members):
+            m = n.members[i]
+            if m.__class__.__name__ == "FunctionDecl":
+                mname = m.name
+                ir_name = f"{cname}__{mname}"
+                self.method_irname[(cname, mname)] = ir_name
+                self._compile_method(cname, ir_name, m)
+            i += 1
+
+    def _compile_method(self, cname: str, ir_name: str, mdecl):
+        # params: this + params declarados
+        params = ["this"] + [p.name for p in (getattr(mdecl, "params", []) or [])]
+        fn = IRFunction(name=ir_name, params=params)
+        self.prog.functions[ir_name] = fn
+
+        prev_fn, prev_frame = self.current_fn, self.frame
+        prev_class = self.cur_class
+        self.current_fn, self.frame = fn, Frame(ir_name, params)
+        self.cur_class = cname
+
+        # scope base
+        self.scopes.clear()
+        self.type_scopes.clear()
+        self._push_scope()
+        # bind this
+        self._bind("this", Param("this"))
+        self._bind_type("this", cname)
+        # bind params
+        for p in params[1:]:
+            self._bind(p, Param(p))
+            self._bind_type(p, None)
+
+        # cuerpo
+        self._visit(mdecl.body)
+
+        self._pop_scope()
+        fn.frame = self.frame
+        self.current_fn, self.frame = prev_fn, prev_frame
+        self.cur_class = prev_class
+
     # ---------------- expresiones ----------------
     def _eval_expr(self, e) -> Operand:
         k = e.__class__.__name__
@@ -202,9 +385,41 @@ class IRGen:
     def _expr_Identifier(self, e) -> Operand:
         op = self._lookup(e.name)
         if op is None:
-            # podría ser un nombre de función usado como valor → no soportado
             raise RuntimeError(f"Identificador no encontrado: {e.name}")
         return op
+
+    def _expr_This(self, e) -> Operand:
+        # Primer parámetro de métodos
+        return Param("this")
+
+    def _expr_MemberAccess(self, e) -> Operand:
+        # R-value: leer campo (this.campo o var.campo)
+        base_op, cls, field = self._resolve_member_target(e)
+        offset = self.class_field_off[cls][field]
+        dst = Temp(self.tpool.new())
+        self._emit(Load(dst, base_op, offset))
+        return dst
+
+    def _resolve_member_target(self, e):
+        """Devuelve (base_operand, class_name, field_name) para MemberAccess."""
+        obj = e.obj
+        field = e.name
+        ck = obj.__class__.__name__
+        if ck == "This":
+            if not self.cur_class:
+                raise RuntimeError("Uso de 'this' fuera de método")
+            return Param("this"), self.cur_class, field
+        if ck == "Identifier":
+            base = self._lookup(obj.name)
+            if base is None:
+                raise RuntimeError(f"Variable no encontrada: {obj.name}")
+            c = self._lookup_type(obj.name)
+            if not c:
+                raise RuntimeError(f"No se conoce clase de '{obj.name}' para acceso a miembro")
+            if c not in self.class_field_off:
+                raise RuntimeError(f"Clase '{c}' sin layout registrado")
+            return base, c, field
+        raise NotImplementedError("MemberAccess: solo 'this.x' o 'var.x' por ahora")
 
     def _expr_Literal(self, e) -> Operand:
         if e.kind == "int":
@@ -212,7 +427,6 @@ class IRGen:
         if e.kind == "boolean":
             return ConstInt(1 if bool(e.value) else 0)
         if e.kind == "string":
-            # registrar string en la tabla global
             label = self._new_string_label(str(e.value))
             return ConstStr(label)
         if e.kind == "null":
@@ -226,13 +440,11 @@ class IRGen:
             self._emit(UnaryOp("neg", dst, v))
             return dst
         if e.op == "!":
-            # dst = (v == 0) ? 1 : 0
             self._emit(Cmp("==", dst, v, ConstInt(0)))
             return dst
         raise NotImplementedError(f"Unary op {e.op} no soportado")
 
     def _expr_Binary(self, e) -> Operand:
-        # aritméticos y relacionales
         if e.op in ("+","-","*","/","%"):
             a = self._eval_expr(e.left)
             b = self._eval_expr(e.right)
@@ -245,68 +457,76 @@ class IRGen:
             dst = Temp(self.tpool.new())
             self._emit(Cmp(e.op, dst, a, b))
             return dst
-        if e.op in ("&&","||"):
-            # Short-circuit a boolean 0/1
-            L_true = self.lgen.new()
-            L_false = self.lgen.new()
-            L_end = self.lgen.new()
-            dst = Temp(self.tpool.new())
-            # dst = 0
-            self._emit(Move(dst, ConstInt(0)))
-            if e.op == "&&":
-                # if !left goto false; if !right goto false; dst=1; goto end; false:
-                self._emit_cond_jump(self._mk_not(e.left), L_false, L_true)  # invertido
-                self._emit(Label(L_true))
-                self._emit_cond_jump(self._mk_not(e.right), L_false, L_end)
-            else:
-                # '||' : if left goto end (dst=1); if right goto end (dst=1); goto false
-                self._emit_cond_jump(e.left, L_end, L_false)
-                self._emit(Label(L_false))
-                self._emit_cond_jump(e.right, L_end, L_false)
-            # set dst=1 en la rama true de salida
-            self._emit(Label(L_end))
-            self._emit(Move(dst, ConstInt(1)))
-            # false:
-            L_tail = self.lgen.new()
-            self._emit(Jump(L_tail))
-            self._emit(Label(L_false))
-            # dst ya es 0
-            self._emit(Label(L_tail))
-            return dst
         raise NotImplementedError(f"Binary op {e.op} no soportado")
 
-    def _mk_not(self, expr):
-        # wrapper pequeño: !(expr)
-        class _Not:
-            __slots__ = ("expr",)
-            def __init__(self, expr): self.expr = expr
-        return _Not(expr)
-
     def _expr_Call(self, e) -> Operand:
-        args = []
+        # Call puede ser:
+        #   - función global: id(args)
+        #   - constructor:  Clase(args)  => malloc + Clase__constructor(this, args)
+        #   - método:       obj.metodo(args) => Clase__metodo(obj, args)
+        cn = e.callee.__class__.__name__
+        args_ops: List[Operand] = []
         i = 0
         while i < len(e.args):
-            args.append(self._eval_expr(e.args[i]))
+            args_ops.append(self._eval_expr(e.args[i]))
             i += 1
-        # ¿retorno?
-        dst = Temp(self.tpool.new())
-        self._emit(Call(dst, self._callee_name(e.callee), args))
-        return dst
 
-    def _callee_name(self, callee_node) -> str:
-        cn = callee_node.__class__.__name__
+        # 1) método obj.metodo(...)
+        if cn == "MemberAccess":
+            obj = e.callee.obj
+            meth = e.callee.name
+            cls: Optional[str] = None
+            base_op: Operand
+
+            ok_simple = False
+            if obj.__class__.__name__ == "This":
+                base_op = Param("this")
+                cls = self.cur_class
+                ok_simple = True
+            elif obj.__class__.__name__ == "Identifier":
+                base_op = self._lookup(obj.name)
+                if base_op is None:
+                    raise RuntimeError(f"Variable no encontrada: {obj.name}")
+                cls = self._lookup_type(obj.name)
+                ok_simple = (cls is not None)
+            if not ok_simple or not cls:
+                raise NotImplementedError("Llamada a método solo soporta 'this.m()' o 'var.m()' con tipo conocido")
+
+            irname = self._lookup_method_irname(cls, meth)
+            dst = Temp(self.tpool.new())
+            self._emit(Call(dst, irname, [base_op] + args_ops))
+            return dst
+
+        # 2) constructor Clase(...)
+        if cn == "Identifier" and e.callee.name in self.class_field_off:
+            cname = e.callee.name
+            size = self._class_size(cname)
+            this_tmp = Temp(self.tpool.new())
+            # this = malloc(size)
+            self._emit(Call(this_tmp, "malloc", [ConstInt(size)]))
+            # llamar constructor si existe
+            ctor_ir = self.method_irname.get((cname, "constructor"))
+            if ctor_ir:
+                self._emit(Call(None, ctor_ir, [this_tmp] + args_ops))
+            return this_tmp
+
+        # 3) función global normal
         if cn == "Identifier":
-            return callee_node.name
-        raise NotImplementedError("Solo llamadas a identificadores simples (func)")
+            fname = e.callee.name
+            dst = Temp(self.tpool.new())
+            self._emit(Call(dst, fname, args_ops))
+            return dst
+
+        raise NotImplementedError("Call no soportada para este tipo de callee")
+
+    def _lookup_method_irname(self, cls: str, meth: str) -> str:
+        ir = self.method_irname.get((cls, meth))
+        if not ir:
+            raise RuntimeError(f"Método '{meth}' no existe en clase '{cls}'")
+        return ir
 
     # ---------------- condicionales en saltos ----------------
     def _emit_cond_jump(self, cond_expr, L_true: str, L_false: str):
-        # cond genérica: si relacional → CJump directo; en otro caso: cond != 0
-        # casos especiales: _Not wrapper (para &&/||)
-        if cond_expr.__class__.__name__ == "_Not":
-            val = self._eval_expr(cond_expr.expr)
-            self._emit(CJump("==", val, ConstInt(0), L_true, L_false))
-            return
         # relacionales directos
         if cond_expr.__class__.__name__ == "Binary" and cond_expr.op in ("==","!=", "<","<=",">",">="):
             a = self._eval_expr(cond_expr.left)
@@ -323,7 +543,6 @@ class IRGen:
         self.current_fn.body.append(instr)
 
     def _new_string_label(self, text: str) -> str:
-        # deduplicación simple: si ya existe, devuelve el label existente
         for k, v in self.prog.strings.items():
             try:
                 if v.decode("utf-8") == text:
@@ -333,3 +552,8 @@ class IRGen:
         label = f"str{len(self.prog.strings)}"
         self.prog.strings[label] = text.encode("utf-8") + b"\x00"
         return label
+
+    def _class_size(self, cname: str) -> int:
+        offmap = self.class_field_off.get(cname, {})
+        # tamaño = (num_campos) * 4
+        return 4 * len(offmap)
