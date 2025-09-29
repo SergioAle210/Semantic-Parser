@@ -47,8 +47,12 @@ class Symbol:
 
 
 class VarSymbol(Symbol):
-    def __init__(self, name, typ):
-        Symbol.__init__(self, name, "var", typ)
+    def __init__(self, name, typ=None):
+        super().__init__(name, kind="var", typ=typ)
+        # --- metadatos para codegen ---
+        self.offset = None  # offset en frame (si se asigna)
+        self.storage = "stack"  # o "global", "param", etc.
+        self.is_param = False  # true si fue declarado como parámetro
 
 
 # símbolo para variable mutable
@@ -61,16 +65,21 @@ class ConstSymbol(Symbol):
 # símbolo para constante
 class ParamSymbol(Symbol):
     def __init__(self, name, typ):
-        Symbol.__init__(self, name, "param", typ)
-        self.inited = True
+        super().__init__(name, typ)
+        self.kind = "param"
+        self.is_param = True
+        self.storage = "param"
 
 
 # símbolo para parámetro de función
 class FunctionSymbol(Symbol):
-    def __init__(self, name, return_type):
-        Symbol.__init__(self, name, "func", None)
-        self.return_type = return_type
-        self.is_method = False
+    def __init__(self, name, ret_typ=None):
+        super().__init__(name, kind="func", typ=None)
+        self.return_type = ret_typ
+        self.params = []
+        self.frame = None
+        self.label = None  # etiqueta de ensamblador (e.g., "main" o "_f_promedio")
+        self.is_builtin = False
 
 
 # símbolo de clase con tabla de miembros y herencia simple
