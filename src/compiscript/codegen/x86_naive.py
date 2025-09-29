@@ -1,12 +1,13 @@
 # compiscript/codegen/x86_naive.py
 from __future__ import annotations
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
 
 from compiscript.codegen.frame import Frame
 from compiscript.ir.tac import (
     IRProgram, IRFunction, Instr, Operand,
     Label, Jump, CJump, Move, BinOp, UnaryOp, Cmp, Call, Return,
-    Temp, Local, Param, ConstInt, ConstStr
+    Temp, Local, Param, ConstInt, ConstStr,
+    Load, Store
 )
 
 # Mapeo de cond a jcc
@@ -43,6 +44,7 @@ class X86Naive:
     def _emit_header(self):
         self.lines.append("; Compiscript x86 (NASM, Intel syntax)")
         self.lines.append("extern printf")
+        self.lines.append("extern malloc")
         self.lines.append("section .data")
 
     def _emit_data(self, prog: IRProgram):
@@ -115,7 +117,7 @@ class X86Naive:
 
         # Primera pasada: asignar slots a todos los Temp que aparezcan
         for ins in fn.body:
-            if isinstance(ins, (Move, BinOp, UnaryOp, Cmp, Call, Return, CJump)):
+            if isinstance(ins, (Move, BinOp, UnaryOp, Cmp, Call, Return, CJump, Load, Store)):
                 ops = []
                 if isinstance(ins, Move):      ops = [ins.dst, ins.src]
                 if isinstance(ins, BinOp):     ops = [ins.dst, ins.a, ins.b]
@@ -128,6 +130,10 @@ class X86Naive:
                     if ins.value is not None: ops.append(ins.value)
                 if isinstance(ins, CJump):
                     ops = [ins.a, ins.b]
+                if isinstance(ins, Load):
+                    ops = [ins.dst, ins.base]
+                if isinstance(ins, Store):
+                    ops = [ins.base, ins.src]
                 for o in ops:
                     if isinstance(o, Temp):
                         self._mem_operand(frame, o)  # fuerza asignación
@@ -209,7 +215,6 @@ class X86Naive:
                 self._store_from_eax(frame, ins.dst)
                 return
             if ins.op == "not":
-                # opcional, no usamos porque Cmp==0 genera mejor
                 self._w("    cmp eax, 0")
                 self._w("    sete al")
                 self._w("    movzx eax, al")
@@ -240,33 +245,50 @@ class X86Naive:
             self._lbl(L_end)
             self._store_from_eax(frame, ins.dst)
             return
+        if isinstance(ins, Load):
+            # dst = *(base + offset)
+            self._load_eax(frame, ins.base)
+            self._w(f"    mov ebx, dword [eax+{ins.offset}]")
+            self._w(f"    mov dword {self._mem_operand(frame, ins.dst)}, ebx")
+            return
+        if isinstance(ins, Store):
+            # *(base + offset) = src
+            self._load_eax(frame, ins.base)
+            if isinstance(ins.src, ConstInt):
+                self._w(f"    mov dword [eax+{ins.offset}], {ins.src.value}")
+            elif isinstance(ins.src, ConstStr):
+                self._w(f"    mov dword [eax+{ins.offset}], {ins.src.label}")
+            else:
+                self._load_ebx(frame, ins.src)
+                self._w(f"    mov dword [eax+{ins.offset}], ebx")
+            return
         if isinstance(ins, Call):
             # caso especial: print
             if ins.func == "print":
                 # un argumento
                 if len(ins.args) != 1:
-                    # ignoramos silenciosamente
                     pass
-                arg = ins.args[0]
-                if isinstance(arg, ConstStr):
-                    # printf("%s\n", arg)
-                    self._w(f"    push {arg.label}")
-                    self._w("    push fmt_str")
-                    self._w("    call printf")
-                    self._w("    add esp, 8")
                 else:
-                    # tratamos como entero
-                    self._load_eax(frame, arg)
-                    self._w("    push eax")
-                    self._w("    push fmt_int")
-                    self._w("    call printf")
-                    self._w("    add esp, 8")
+                    arg = ins.args[0]
+                    if isinstance(arg, ConstStr):
+                        # printf("%s\n", arg)
+                        self._w(f"    push {arg.label}")
+                        self._w("    push fmt_str")
+                        self._w("    call printf")
+                        self._w("    add esp, 8")
+                    else:
+                        # entero
+                        self._load_eax(frame, arg)
+                        self._w("    push eax")
+                        self._w("    push fmt_int")
+                        self._w("    call printf")
+                        self._w("    add esp, 8")
                 # retorno de print es void
                 if ins.dst is not None:
-                    # por consistencia: dst = 0
                     self._w("    mov eax, 0")
                     self._store_from_eax(frame, ins.dst)
                 return
+
             # llamada genérica: push args (derecha->izquierda)
             for a in reversed(ins.args):
                 if isinstance(a, ConstInt):
@@ -290,4 +312,3 @@ class X86Naive:
 
         # fallback:
         self._w(f"    ; instr desconocida {ins}")
-
