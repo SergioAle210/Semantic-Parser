@@ -2,7 +2,6 @@
 from __future__ import annotations
 from typing import Dict, List, Optional
 
-
 class Frame:
     """
     Frame muy simple para x86 (cdecl):
@@ -11,7 +10,6 @@ class Frame:
       [ebp-4]  1er local/temporal
       [ebp-8]  2do local/temporal ...
     """
-
     def __init__(self, func_name: str, params: List[str]):
         self.func_name = func_name
         # params: desplazamientos positivos
@@ -21,7 +19,7 @@ class Frame:
             self.param_off[p] = off
             off += 4
         # locals/temps: desplazamientos negativos
-        self.local_off: Dict[str, int] = {}  # name -> positive slot index (1-based)
+        self.local_off: Dict[str, int] = {}   # name -> positive slot index (1-based)
         self._locals_bytes = 0
 
     def ensure_local(self, name: str) -> int:
