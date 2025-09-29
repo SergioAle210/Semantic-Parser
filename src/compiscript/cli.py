@@ -20,7 +20,6 @@ from compiscript.codegen.x86_naive import X86Naive
 class SyntaxErrorListener(ErrorListener):
     def __init__(self):
         self.errors = []
-
     def syntaxError(self, recognizer, offendingSymbol, line, column, msg, e):
         self.errors.append("[" + str(line) + ":" + str(column) + "] " + msg)
 
@@ -66,16 +65,10 @@ def main():
     png_path = os.path.join(out_ast_dir, base + ".png")
     if dot_exe:
         try:
-            subprocess.run(
-                [dot_exe, "-Tpng", "-o", png_path],
-                input=dot_text.encode("utf-8"),
-                check=True,
-            )
+            subprocess.run([dot_exe, "-Tpng", "-o", png_path], input=dot_text.encode("utf-8"), check=True)
             print("AST (PNG) guardado en:", png_path)
         except Exception:
-            print(
-                "Advertencia: no se pudo generar el PNG con Graphviz (se guardó solo el .txt)."
-            )
+            print("Advertencia: no se pudo generar el PNG con Graphviz (se guardó solo el .txt).")
     else:
         print("Advertencia: Graphviz 'dot' no encontrado; se guardó solo el .txt.")
 
@@ -105,7 +98,6 @@ def main():
     with open(asm_path, "w", encoding="utf-8") as f:
         f.write(asm)
     print("ASM (x86) guardado en:", asm_path)
-
 
 if __name__ == "__main__":
     main()
