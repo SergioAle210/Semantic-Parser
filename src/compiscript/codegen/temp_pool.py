@@ -1,7 +1,6 @@
 # compiscript/codegen/temp_pool.py
 from __future__ import annotations
 
-
 class TempPool:
     def __init__(self, prefix: str = "t"):
         self.prefix = prefix
