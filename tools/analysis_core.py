@@ -121,11 +121,7 @@ def _is_quoted_string(s: str) -> bool:
     return (len(s) >= 2) and (s[0] == '"') and (s[len(s) - 1] == '"')
 
 
-# =========================================================
-#            Infra de errores léx/sintax (ANTLR)
-# =========================================================
-
-
+# Infra de errores léx/sintax (ANTLR)
 class CollectingErrorListener(ErrorListener):
     def __init__(self, kind: str):
         super().__init__()
@@ -138,15 +134,12 @@ class CollectingErrorListener(ErrorListener):
         )
 
 
-# =========================================================
-#              Serialización (símbolos/func/clase)
-# =========================================================
-
-
+# Serialización (símbolos/func/clase)
 def _type_str(t: Optional[Type]) -> Optional[str]:
     return str(t) if t is not None else None
 
 
+# serialize función a dict
 def _serialize_function(fsym) -> Dict[str, Any]:
     params = []
     i = 0
@@ -169,6 +162,7 @@ def _serialize_function(fsym) -> Dict[str, Any]:
     }
 
 
+# serialize clase a dict
 def _serialize_class(env, csym) -> Dict[str, Any]:
     fields = []
     methods = []
@@ -211,6 +205,7 @@ def _serialize_class(env, csym) -> Dict[str, Any]:
     }
 
 
+# snapshot de símbolos globales a dict
 def snapshot_symbols(checker: Checker) -> Dict[str, Any]:
     env = checker.env
     g = env.global_scope.table
@@ -238,11 +233,7 @@ def snapshot_symbols(checker: Checker) -> Dict[str, Any]:
     }
 
 
-# =========================================================
-#                      Tokens / Hover
-# =========================================================
-
-
+# Tokens / Hover
 def collect_tokens(ts: CommonTokenStream) -> List[Dict[str, Any]]:
     toks = []
     if ts.tokens is None:
@@ -265,6 +256,7 @@ def collect_tokens(ts: CommonTokenStream) -> List[Dict[str, Any]]:
     return toks
 
 
+# busca token en posición (línea, columna)
 def find_token_at(ts: CommonTokenStream, line: int, col: int):
     if ts.tokens is None:
         return None
@@ -286,6 +278,7 @@ def find_token_at(ts: CommonTokenStream, line: int, col: int):
     return None
 
 
+# hover en posición (línea, columna)
 def hover_at(code: str, line: int, col: int) -> Dict[str, Any]:
     # prepara lexer/parser para tokens
     input_stream = InputStream(code)
@@ -324,11 +317,7 @@ def hover_at(code: str, line: int, col: int) -> Dict[str, Any]:
     return {"token": text, "kind": "identifier", "type": None}
 
 
-# =========================================================
-#                     Análisis principal
-# =========================================================
-
-
+# Análisis principal
 def analyze_internal(
     code: str,
     include_ast: bool = True,
@@ -365,11 +354,7 @@ def analyze_internal(
     return out
 
 
-# =========================================================
-#                   Quick-Fixes sin regex
-# =========================================================
-
-
+# Quick-Fixes sin regex
 def _class_members_from_symbols(symbols: Dict[str, Any], cls_name: str) -> List[str]:
     gl = symbols.get("globals", {})
     classes = gl.get("classes", []) if isinstance(gl, dict) else []
