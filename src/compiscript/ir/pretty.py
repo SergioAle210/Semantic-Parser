@@ -4,8 +4,10 @@ from typing import List
 from compiscript.ir.tac import (
     IRProgram, IRFunction, Instr, Operand,
     Label, Jump, CJump, Move, BinOp, UnaryOp, Cmp, Call, Return,
-    Temp, Local, Param, ConstInt, ConstStr
+    Temp, Local, Param, ConstInt, ConstStr,
+    Load, Store, LoadI, StoreI
 )
+
 
 def _opnd(o: Operand) -> str:
     if isinstance(o, Temp):     return f"%{o.name}"
@@ -31,6 +33,15 @@ def _ins(i: Instr) -> str:
         return f"  {_opnd(i.dst)} = {u}({_opnd(i.a)})"
     if isinstance(i, Cmp):
         return f"  {_opnd(i.dst)} = ({_opnd(i.a)} {i.op} {_opnd(i.b)})"
+    if isinstance(i, Load):
+        return f"  {_opnd(i.dst)} = *({_opnd(i.base)} + {i.offset})"
+    if isinstance(i, Store):
+        return f"  *({_opnd(i.base)} + {i.offset}) = {_opnd(i.src)}"
+    if isinstance(i, LoadI):
+        return f"  {_opnd(i.dst)} = *({_opnd(i.base)} + 4 + {_opnd(i.index)}*4)"
+    if isinstance(i, StoreI):
+        return f"  *({_opnd(i.base)} + 4 + {_opnd(i.index)}*4) = {_opnd(i.src)}"
+
     if isinstance(i, Call):
         args = ", ".join(_opnd(a) for a in i.args)
         if i.dst is None:

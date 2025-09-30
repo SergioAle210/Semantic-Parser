@@ -119,6 +119,20 @@ class Store(Instr):
     offset: int  # bytes
     src: Operand
 
+@dataclass
+class LoadI(Instr):
+    """dst = *(base + 4 + index*4)   ; header de 4 bytes para length"""
+    dst: Operand
+    base: Operand
+    index: Operand  # int
+
+@dataclass
+class StoreI(Instr):
+    """*(base + 4 + index*4) = src"""
+    base: Operand
+    index: Operand
+    src: Operand
+
 
 # -------------------------
 # Unidades IR
