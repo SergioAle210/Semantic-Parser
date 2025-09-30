@@ -1,11 +1,10 @@
-# compiscript/ir/pretty.py
+# src/compiscript/ir/pretty.py
 from __future__ import annotations
 from typing import List
 from compiscript.ir.tac import (
     IRProgram, IRFunction, Instr, Operand,
     Label, Jump, CJump, Move, BinOp, UnaryOp, Cmp, Call, Return,
-    Temp, Local, Param, ConstInt, ConstStr,
-    Load, Store
+    Temp, Local, Param, ConstInt, ConstStr
 )
 
 def _opnd(o: Operand) -> str:
@@ -37,26 +36,19 @@ def _ins(i: Instr) -> str:
         if i.dst is None:
             return f"  call {i.func}({args})"
         return f"  {_opnd(i.dst)} = call {i.func}({args})"
-    if isinstance(i, Load):
-        return f"  {_opnd(i.dst)} = *({_opnd(i.base)} + {i.offset})"
-    if isinstance(i, Store):
-        return f"  *({_opnd(i.base)} + {i.offset}) = {_opnd(i.src)}"
     if isinstance(i, Return):
-        if i.value is None:
-            return "  return"
-        return f"  return {_opnd(i.value)}"
+        return "  return" if i.value is None else f"  return {_opnd(i.value)}"
     return f"  ; {i}"
 
 def format_ir(prog: IRProgram) -> str:
     out: List[str] = []
-    # strings
+    # strings (mostrar sin el NUL final)
     if prog.strings:
         out.append("; .strings")
         for k, v in prog.strings.items():
-            try:
-                s = v.decode("utf-8")
-            except Exception:
-                s = repr(v)
+            s = v.replace(b"\x00", b"").decode("utf-8", "backslashreplace")
+            # escapar saltos para que el IR sea legible
+            s = s.replace("\n", "\\n").replace("\r", "\\r")
             out.append(f";   {k}: {s}")
         out.append("")
     # functions
