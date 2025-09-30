@@ -7,7 +7,7 @@ from compiscript.ir.tac import (
     IRProgram, IRFunction, Instr, Operand,
     Label, Jump, CJump, Move, BinOp, UnaryOp, Cmp, Call, Return,
     Temp, Local, Param, ConstInt, ConstStr,
-    Load, Store
+    Load, Store, LoadI, StoreI
 )
 
 # Mapeo de cond a jcc
@@ -261,6 +261,45 @@ class X86Naive:
             else:
                 self._load_ebx(frame, ins.src)
                 self._w(f"    mov dword [eax+{ins.offset}], ebx")
+            return
+        if isinstance(ins, LoadI):
+            # eax = base; ebx = index
+            self._load_eax(frame, ins.base)
+            # index a EBX
+            if isinstance(ins.index, ConstInt):
+                # [eax + 4 + idx*4]
+                byte_off = 4 + ins.index.value * 4
+                self._w(f"    mov ebx, dword [eax+{byte_off}]")
+            else:
+                self._load_ebx(frame, ins.index)
+                self._w("    mov ecx, dword [eax + ebx*4 + 4]")
+                self._w("    mov ebx, ecx")
+            self._w(f"    mov dword {self._mem_operand(frame, ins.dst)}, ebx")
+            return
+
+        if isinstance(ins, StoreI):
+            # eax = base; escribir src en [eax + 4 + idx*4]
+            self._load_eax(frame, ins.base)
+            if isinstance(ins.index, ConstInt):
+                byte_off = 4 + ins.index.value * 4
+                if isinstance(ins.src, ConstInt):
+                    self._w(f"    mov dword [eax+{byte_off}], {ins.src.value}")
+                elif isinstance(ins.src, ConstStr):
+                    self._w(f"    mov dword [eax+{byte_off}], {ins.src.label}")
+                else:
+                    self._load_ebx(frame, ins.src)
+                    self._w(f"    mov dword [eax+{byte_off}], ebx")
+            else:
+                self._load_ebx(frame, ins.index)
+                if isinstance(ins.src, ConstInt):
+                    self._w(f"    mov ecx, {ins.src.value}")
+                elif isinstance(ins.src, ConstStr):
+                    self._w(f"    mov ecx, {ins.src.label}")
+                else:
+                    self._load_ebx(frame, ins.src)   # src -> ebx
+                    self._w("    mov ecx, ebx")
+                # [eax + ebx*4 + 4] = ecx
+                self._w("    mov dword [eax + ebx*4 + 4], ecx")
             return
         if isinstance(ins, Call):
             # caso especial: print
