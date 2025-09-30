@@ -9,7 +9,7 @@ from compiscript.ir.tac import (
     Instr, Operand,
     Temp, Local, Param, ConstInt, ConstStr,
     Label, Jump, CJump, Move, BinOp, UnaryOp, Cmp, Call, Return,
-    Load, Store,
+    Load, Store, LoadI, StoreI
 )
 
 # Utilidad para nombres de etiquetas
@@ -55,6 +55,17 @@ class IRGen:
         # clase activa (dentro de método)
         self.cur_class: Optional[str] = None
 
+        # pila de break/continue (pares de labels)
+        self.break_stack: List[str] = []
+        self.cont_stack: List[str] = []
+
+        # herencia: clase -> base
+        self.class_base: Dict[str, Optional[str]] = {}
+
+        # función sintética para sentencias top-level
+        self.toplevel: Optional[IRFunction] = None
+
+
     # ------------- helpers de scopes -------------
     def _push_scope(self):
         self.scopes.append({})
@@ -80,6 +91,41 @@ class IRGen:
             if name in m:
                 return m[name]
         return None
+    
+    def _release_if_temp(self, op: Operand):
+        if isinstance(op, Temp):
+            self.tpool.release(op.name)
+
+    def _loop_push(self, L_continue: str, L_break: str):
+        self.cont_stack.append(L_continue)
+        self.break_stack.append(L_break)
+
+    def _loop_pop(self):
+        self.cont_stack.pop()
+        self.break_stack.pop()
+
+    def _current_break(self) -> Optional[str]:
+        return self.break_stack[-1] if self.break_stack else None
+
+    def _current_continue(self) -> Optional[str]:
+        return self.cont_stack[-1] if self.cont_stack else None
+
+    def _ensure_toplevel(self):
+        """Crea (una vez) la función sintética __toplevel para compilar sentencias globales."""
+        if self.toplevel is not None and self.current_fn is self.toplevel:
+            return
+        if self.toplevel is None:
+            fn = IRFunction(name="__toplevel", params=[])
+            self.prog.functions["__toplevel"] = fn
+            self.toplevel = fn
+        # activar contexto de compilación del toplevel
+        self.current_fn = self.toplevel
+        self.frame = Frame(self.toplevel.name, [])
+        # scopes frescos para el toplevel (no limpiar los ya existentes si venimos de otro lado)
+        self.scopes = []
+        self.type_scopes = []
+        self._push_scope()
+
 
     # ------------- API principal -------------
     def build(self, ast_root) -> IRProgram:
@@ -88,8 +134,11 @@ class IRGen:
         Espera que el código defina una función 'main' como punto de entrada.
         """
         self._visit(ast_root)
-        if self.prog.entry is None and "main" in self.prog.functions:
-            self.prog.entry = "main"
+        if self.prog.entry is None:
+            if "main" in self.prog.functions:
+                self.prog.entry = "main"
+            elif self.toplevel is not None:
+                self.prog.entry = self.toplevel.name
         return self.prog
 
     # ------------- despacho genérico -------------
@@ -106,8 +155,17 @@ class IRGen:
     def _visit_Program(self, n):
         i = 0
         while i < len(n.statements):
-            self._visit(n.statements[i])
+            s = n.statements[i]
+            k = s.__class__.__name__
+            if k in ("FunctionDecl", "ClassDecl"):
+                self._visit(s)
+            else:
+                self._ensure_toplevel()
+                self._visit(s)
             i += 1
+        # cerrar frame del toplevel si existe
+        if self.toplevel is not None and self.toplevel.frame is None:
+            self.toplevel.frame = self.frame
 
     def _visit_FunctionDecl(self, n):
         fname = n.name
@@ -117,14 +175,15 @@ class IRGen:
         if fname == "main":
             self.prog.entry = "main"
 
-        # prepara frame y scopes
-        prev_fn, prev_frame = self.current_fn, self.frame
-        prev_class = self.cur_class
+        # guardar contexto actual
+        prev_fn, prev_frame, prev_class = self.current_fn, self.frame, self.cur_class
+        prev_scopes, prev_types = self.scopes, self.type_scopes
+
+        # preparar contexto de la función
         self.current_fn, self.frame = fn, Frame(fname, params)
         self.cur_class = None
-
-        self.scopes.clear()
-        self.type_scopes.clear()
+        self.scopes = []
+        self.type_scopes = []
         self._push_scope()
         for p in params:
             self._bind(p, Param(p))
@@ -133,11 +192,11 @@ class IRGen:
         # cuerpo
         self._visit(n.body)
 
-        # cerrar
+        # cerrar y restaurar
         self._pop_scope()
         fn.frame = self.frame
-        self.current_fn, self.frame = prev_fn, prev_frame
-        self.cur_class = prev_class
+        self.current_fn, self.frame, self.cur_class = prev_fn, prev_frame, prev_class
+        self.scopes, self.type_scopes = prev_scopes, prev_types
 
     def _visit_Block(self, n):
         self._push_scope()
@@ -210,7 +269,17 @@ class IRGen:
             self._emit(Store(base_op, offset, src))
             return
 
-        raise NotImplementedError("Assign: solo Identifier o MemberAccess como LHS por ahora")
+        if k == "IndexAccess":
+            base = self._eval_expr(tgt.obj)
+            idx  = self._eval_expr(tgt.index)
+            src  = self._eval_expr(n.value)
+            self._emit(StoreI(base, idx, src))
+            # reciclar
+            self._release_if_temp(base); self._release_if_temp(idx); self._release_if_temp(src)
+            return
+
+
+        raise NotImplementedError("Assign: solo Identifier, MemberAccess y IndexAccess soportados")
 
     def _visit_Return(self, n):
         if getattr(n, "value", None) is None:
@@ -243,61 +312,132 @@ class IRGen:
         L_end  = self.lgen.new()
         self._emit(Label(L_cond))
         self._emit_cond_jump(n.cond, L_body, L_end)
+        self._loop_push(L_cond, L_end)
         self._emit(Label(L_body))
         self._visit(n.body)
         self._emit(Jump(L_cond))
+        self._loop_pop()
         self._emit(Label(L_end))
+
+    def _visit_DoWhile(self, n):
+        L_cond = self.lgen.new()
+        L_body = self.lgen.new()
+        L_end  = self.lgen.new()
+        self._emit(Label(L_body))
+        self._loop_push(L_cond, L_end)
+        self._visit(n.body)
+        self._loop_pop()
+        self._emit(Label(L_cond))
+        self._emit_cond_jump(n.cond, L_body, L_end)
+        self._emit(Label(L_end))
+
 
     def _visit_Switch(self, n):
         disc = self._eval_expr(n.expr)
-        L_end = self.lgen.new()
         cases = getattr(n, "cases", []) or []
         has_default = getattr(n, "default_block", None) is not None
+        L_end = self.lgen.new()
+        labels = [self.lgen.new() for _ in cases]
         L_default = self.lgen.new() if has_default else L_end
 
-        # Salto a cada case
+        # cadena de comparaciones
         next_label = L_default
-        for idx, c in enumerate(cases):
-            L_case = self.lgen.new()
+        for i, c in enumerate(cases):
+            L_case = labels[i]
+            L_next = labels[i+1] if i+1 < len(cases) else L_default
             cv = self._eval_expr(c.expr)
-            # if disc == cv -> L_case else next (que será el siguiente compare o default)
-            L_next = self.lgen.new() if idx < len(cases)-1 else L_default
             self._emit(CJump("==", disc, cv, L_case, L_next))
-            # preparar siguiente
-            next_label = L_next
-            self._emit(Label(L_case))
-            self._visit(c.block)
-            self._emit(Jump(L_end))
-            self._emit(Label(next_label))
+            self._release_if_temp(cv)
 
+        # compilar casos (fallthrough por omisión)
+        self._loop_push(None, L_end)  # sólo break válido
+        for i, c in enumerate(cases):
+            self._emit(Label(labels[i]))
+            self._visit(c.block)
+            # sin salto al final: fallthrough si no hay break
         if has_default:
             self._emit(Label(L_default))
             self._visit(n.default_block)
+        self._loop_pop()
+
         self._emit(Label(L_end))
+        self._release_if_temp(disc)
+
 
     def _visit_Foreach(self, n):
-        # Solo soportamos: foreach v in [e1, e2, ...] { body }
-        iterable = n.iterable
-        if iterable.__class__.__name__ != "ArrayLiteral":
-            raise NotImplementedError("foreach: por ahora solo ArrayLiteral")
+        # variable del foreach
         var_name = n.var_name
-        # nuevo scope
         self._push_scope()
         self.frame.ensure_local(var_name)
         if var_name not in self.current_fn.locals:
             self.current_fn.locals.append(var_name)
-        loc = Local(var_name)
-        self._bind(var_name, loc)
+        loc_var = Local(var_name)
+        self._bind(var_name, loc_var)
         self._bind_type(var_name, None)
 
-        i = 0
-        while i < len(iterable.elements):
-            val = self._eval_expr(iterable.elements[i])
-            self._emit(Move(loc, val))
-            self._visit(n.body)
-            i += 1
+        arr = self._eval_expr(n.iterable)           # puntero al arreglo
+        length = Temp(self.tpool.new())
+        self._emit(Load(length, arr, 0))            # length = *(arr + 0)
 
+        idx = Temp(self.tpool.new())
+        self._emit(Move(idx, ConstInt(0)))
+
+        L_cond = self.lgen.new()
+        L_body = self.lgen.new()
+        L_end  = self.lgen.new()
+
+        self._emit(Label(L_cond))
+        self._emit(CJump("<", idx, length, L_body, L_end))
+
+        # cuerpo
+        self._loop_push(L_cond, L_end)
+        self._emit(Label(L_body))
+        cur = Temp(self.tpool.new())
+        self._emit(LoadI(cur, arr, idx))           # cur = arr[idx]
+        self._emit(Move(loc_var, cur))
+        self._release_if_temp(cur)
+        self._visit(n.body)
+        # idx++
+        one = ConstInt(1)
+        nxt = Temp(self.tpool.new())
+        self._emit(BinOp("+", nxt, idx, one))
+        self._emit(Move(idx, nxt))
+        self._release_if_temp(nxt)
+        self._emit(Jump(L_cond))
+        self._loop_pop()
+
+        self._emit(Label(L_end))
+        # limpiar
+        self._release_if_temp(arr); self._release_if_temp(length); self._release_if_temp(idx)
         self._pop_scope()
+
+
+    def _visit_For(self, n):
+        # init
+        if n.init is not None:
+            self._visit(n.init)
+        L_cond = self.lgen.new()
+        L_body = self.lgen.new()
+        L_update = self.lgen.new()
+        L_end = self.lgen.new()
+
+        self._emit(Label(L_cond))
+        if n.cond is not None:
+            self._emit_cond_jump(n.cond, L_body, L_end)
+        else:
+            # for(;;) -> siempre true
+            self._emit(Jump(L_body))
+
+        self._loop_push(L_update, L_end)
+        self._emit(Label(L_body))
+        self._visit(n.body)
+        self._emit(Label(L_update))
+        if n.update is not None:
+            self._visit(n.update)
+        self._emit(Jump(L_cond))
+        self._loop_pop()
+        self._emit(Label(L_end))
+
 
     def _visit_TryCatch(self, n):
         # Sin runtime de excepciones: compilar solo el try
@@ -316,15 +456,26 @@ class IRGen:
 
     def _visit_ClassDecl(self, n):
         cname = n.name
-        # 1) layout de campos (4 bytes por campo)
-        fields: List[str] = []
+        base = getattr(n, "base_name", None)
+        self.class_base[cname] = base
+
+        # 1) layout de campos: incluir primero los de la base (si hay)
+        base_fields = []
+        if base and base in self.class_field_off:
+            # reconstruir la lista de campos de la base a partir del mapa
+            # (orden por offset)
+            base_map = self.class_field_off[base]
+            base_fields = [k for k,_ in sorted(base_map.items(), key=lambda kv: kv[1])]
+
+        own_fields: List[str] = []
         i = 0
         while i < len(n.members):
             m = n.members[i]
-            mk = m.__class__.__name__
-            if mk in ("VarDecl", "ConstDecl"):
-                fields.append(m.name)
+            if m.__class__.__name__ in ("VarDecl", "ConstDecl"):
+                own_fields.append(m.name)
             i += 1
+
+        fields = base_fields + own_fields
         offmap: Dict[str, int] = {}
         off = 0
         for f in fields:
@@ -343,25 +494,39 @@ class IRGen:
                 self._compile_method(cname, ir_name, m)
             i += 1
 
+    def _visit_Break(self, n):
+        L = self._current_break()
+        if L is None:
+            # fuera de bucle/switch: ignoramos en CI
+            return
+        self._emit(Jump(L))
+
+    def _visit_Continue(self, n):
+        L = self._current_continue()
+        if L is None:
+            return
+        self._emit(Jump(L))
+
+
     def _compile_method(self, cname: str, ir_name: str, mdecl):
-        # params: this + params declarados
         params = ["this"] + [p.name for p in (getattr(mdecl, "params", []) or [])]
         fn = IRFunction(name=ir_name, params=params)
         self.prog.functions[ir_name] = fn
 
-        prev_fn, prev_frame = self.current_fn, self.frame
-        prev_class = self.cur_class
+        # guardar contexto actual (incluyendo scopes)
+        prev_fn, prev_frame, prev_class = self.current_fn, self.frame, self.cur_class
+        prev_scopes, prev_types = self.scopes, self.type_scopes
+
+        # activar contexto del método
         self.current_fn, self.frame = fn, Frame(ir_name, params)
         self.cur_class = cname
-
-        # scope base
-        self.scopes.clear()
-        self.type_scopes.clear()
+        self.scopes = []
+        self.type_scopes = []
         self._push_scope()
-        # bind this
+
+        # bind this y parámetros
         self._bind("this", Param("this"))
         self._bind_type("this", cname)
-        # bind params
         for p in params[1:]:
             self._bind(p, Param(p))
             self._bind_type(p, None)
@@ -369,10 +534,12 @@ class IRGen:
         # cuerpo
         self._visit(mdecl.body)
 
+        # cerrar y restaurar
         self._pop_scope()
         fn.frame = self.frame
-        self.current_fn, self.frame = prev_fn, prev_frame
-        self.cur_class = prev_class
+        self.current_fn, self.frame, self.cur_class = prev_fn, prev_frame, prev_class
+        self.scopes, self.type_scopes = prev_scopes, prev_types
+
 
     # ---------------- expresiones ----------------
     def _eval_expr(self, e) -> Operand:
@@ -399,6 +566,33 @@ class IRGen:
         dst = Temp(self.tpool.new())
         self._emit(Load(dst, base_op, offset))
         return dst
+    
+    def _expr_ArrayLiteral(self, e) -> Operand:
+        # tamaño en bytes = 4 (length) + n*4
+        n = len(e.elements)
+        size = 4 + n*4
+        arr = Temp(self.tpool.new())
+        self._emit(Call(arr, "malloc", [ConstInt(size)]))
+        # length
+        self._emit(Store(arr, 0, ConstInt(n)))
+        # elementos
+        i = 0
+        while i < n:
+            val = self._eval_expr(e.elements[i])
+            self._emit(Store(arr, 4 + i*4, val))
+            self._release_if_temp(val)
+            i += 1
+        return arr
+
+    def _expr_IndexAccess(self, e) -> Operand:
+        base = self._eval_expr(e.obj)
+        idx  = self._eval_expr(e.index)
+        dst  = Temp(self.tpool.new())
+        self._emit(LoadI(dst, base, idx))
+        # reciclar
+        self._release_if_temp(base); self._release_if_temp(idx)
+        return dst
+
 
     def _resolve_member_target(self, e):
         """Devuelve (base_operand, class_name, field_name) para MemberAccess."""
@@ -445,19 +639,64 @@ class IRGen:
         raise NotImplementedError(f"Unary op {e.op} no soportado")
 
     def _expr_Binary(self, e) -> Operand:
+        # '+' especial: si cualquiera es ConstStr, llamar a __concat (opcional)
+        if e.op == "+" and (e.left.__class__.__name__ == "Literal" and e.left.kind == "string"
+                            or e.right.__class__.__name__ == "Literal" and e.right.kind == "string"):
+            a = self._eval_expr(e.left)
+            b = self._eval_expr(e.right)
+            dst = Temp(self.tpool.new())
+            self._emit(Call(dst, "__concat", [a, b]))  # runtime opcional
+            self._release_if_temp(a); self._release_if_temp(b)
+            return dst
+
         if e.op in ("+","-","*","/","%"):
             a = self._eval_expr(e.left)
             b = self._eval_expr(e.right)
             dst = Temp(self.tpool.new())
             self._emit(BinOp(e.op, dst, a, b))
+            self._release_if_temp(a); self._release_if_temp(b)
             return dst
+
         if e.op in ("==","!=", "<","<=",">",">="):
             a = self._eval_expr(e.left)
             b = self._eval_expr(e.right)
             dst = Temp(self.tpool.new())
             self._emit(Cmp(e.op, dst, a, b))
+            self._release_if_temp(a); self._release_if_temp(b)
             return dst
+
+        if e.op in ("&&", "||"):
+            L_true  = self.lgen.new()
+            L_false = self.lgen.new()
+            L_end   = self.lgen.new()
+            dst = Temp(self.tpool.new())
+            # init dst = 0
+            self._emit(Move(dst, ConstInt(0)))
+            if e.op == "&&":
+                # if !left goto false
+                self._emit_cond_jump(("NOT", e.left), L_false, L_true)
+                self._emit(Label(L_true))
+                # if !right goto false
+                L_true2 = self.lgen.new()
+                self._emit_cond_jump(("NOT", e.right), L_false, L_true2)
+                self._emit(Label(L_true2))
+                self._emit(Move(dst, ConstInt(1)))
+                self._emit(Jump(L_end))
+            else:
+                # '||'
+                self._emit_cond_jump(e.left, L_true, L_false)
+                self._emit(Label(L_false))
+                self._emit_cond_jump(e.right, L_true, L_false)
+                self._emit(Label(L_true))
+                self._emit(Move(dst, ConstInt(1)))
+                self._emit(Jump(L_end))
+            self._emit(Label(L_false))
+            # dst ya es 0
+            self._emit(Label(L_end))
+            return dst
+
         raise NotImplementedError(f"Binary op {e.op} no soportado")
+
 
     def _expr_Call(self, e) -> Operand:
         # Call puede ser:
@@ -520,22 +759,36 @@ class IRGen:
         raise NotImplementedError("Call no soportada para este tipo de callee")
 
     def _lookup_method_irname(self, cls: str, meth: str) -> str:
-        ir = self.method_irname.get((cls, meth))
-        if not ir:
-            raise RuntimeError(f"Método '{meth}' no existe en clase '{cls}'")
-        return ir
+        c = cls
+        visited = set()
+        while c and c not in visited:
+            visited.add(c)
+            ir = self.method_irname.get((c, meth))
+            if ir:
+                return ir
+            c = self.class_base.get(c)
+        raise RuntimeError(f"Método '{meth}' no existe en clase '{cls}' ni en su base")
 
     # ---------------- condicionales en saltos ----------------
     def _emit_cond_jump(self, cond_expr, L_true: str, L_false: str):
+        # soporta wrapper ("NOT", expr)
+        if isinstance(cond_expr, tuple) and len(cond_expr) == 2 and cond_expr[0] == "NOT":
+            v = self._eval_expr(cond_expr[1])
+            self._emit(CJump("==", v, ConstInt(0), L_true, L_false))
+            self._release_if_temp(v)
+            return
         # relacionales directos
         if cond_expr.__class__.__name__ == "Binary" and cond_expr.op in ("==","!=", "<","<=",">",">="):
             a = self._eval_expr(cond_expr.left)
             b = self._eval_expr(cond_expr.right)
             self._emit(CJump(cond_expr.op, a, b, L_true, L_false))
+            self._release_if_temp(a); self._release_if_temp(b)
             return
-        # default: evaluar a entero y comparar != 0
+        # default: evaluar != 0
         v = self._eval_expr(cond_expr)
         self._emit(CJump("!=", v, ConstInt(0), L_true, L_false))
+        self._release_if_temp(v)
+
 
     # ---------------- util ----------------
     def _emit(self, instr: Instr):
