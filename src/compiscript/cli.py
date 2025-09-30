@@ -1,4 +1,4 @@
-﻿# compiscript/cli.py
+﻿# src/compiscript/cli.py
 import sys, os, shutil, subprocess
 from antlr4 import FileStream, CommonTokenStream
 from antlr4.error.ErrorListener import ErrorListener
@@ -21,7 +21,19 @@ class SyntaxErrorListener(ErrorListener):
     def __init__(self):
         self.errors = []
     def syntaxError(self, recognizer, offendingSymbol, line, column, msg, e):
-        self.errors.append("[" + str(line) + ":" + str(column) + "] " + msg)
+        self.errors.append(f"[{line}:{column}] {msg}")
+
+
+def _mk_out_dirs(repo_root: str, src_path: str):
+    base = os.path.splitext(os.path.basename(src_path))[0]
+    out_root = os.path.join(repo_root, "build", base)
+    ast_dir = os.path.join(out_root, "ast")
+    ir_dir  = os.path.join(out_root, "ir")
+    asm_dir = os.path.join(out_root, "asm")
+    os.makedirs(ast_dir, exist_ok=True)
+    os.makedirs(ir_dir,  exist_ok=True)
+    os.makedirs(asm_dir, exist_ok=True)
+    return out_root, ast_dir, ir_dir, asm_dir, base
 
 
 def main():
@@ -49,24 +61,24 @@ def main():
     # ParseTree -> AST
     ast = ASTBuilder().visit(tree)
 
-    # Guardar DOT (.txt) y PNG con nombre del archivo fuente
+    # Dirs de salida por archivo
     repo_root = os.path.dirname(BASE)
-    out_ast_dir = os.path.join(repo_root, "build", "ast")
-    os.makedirs(out_ast_dir, exist_ok=True)
+    out_root, ast_dir, ir_dir, asm_dir, base = _mk_out_dirs(repo_root, src_path)
 
-    base = os.path.splitext(os.path.basename(src_path))[0]
+    # AST → DOT (+ opcional PNG)
     dot_text = DotBuilder().build(ast)
-    txt_path = os.path.join(out_ast_dir, base + ".txt")
-    with open(txt_path, "w", encoding="utf-8") as f:
+    ast_txt = os.path.join(ast_dir, "ast.dot.txt")
+    with open(ast_txt, "w", encoding="utf-8") as f:
         f.write(dot_text)
-    print("AST (DOT) guardado en:", txt_path)
+    print("AST (DOT) guardado en:", ast_txt)
 
     dot_exe = os.environ.get("DOT_EXE") or shutil.which("dot")
-    png_path = os.path.join(out_ast_dir, base + ".png")
+    ast_png = os.path.join(ast_dir, "ast.png")
     if dot_exe:
         try:
-            subprocess.run([dot_exe, "-Tpng", "-o", png_path], input=dot_text.encode("utf-8"), check=True)
-            print("AST (PNG) guardado en:", png_path)
+            subprocess.run([dot_exe, "-Tpng", "-o", ast_png],
+                           input=dot_text.encode("utf-8"), check=True)
+            print("AST (PNG) guardado en:", ast_png)
         except Exception:
             print("Advertencia: no se pudo generar el PNG con Graphviz (se guardó solo el .txt).")
     else:
@@ -82,22 +94,19 @@ def main():
     print("✓ Análisis semántico: OK")
 
     # IR
-    ir = IRGen().build(ast)
-    ir_dir = os.path.join(repo_root, "build", "ir")
-    os.makedirs(ir_dir, exist_ok=True)
-    ir_path = os.path.join(ir_dir, base + ".ir.txt")
-    with open(ir_path, "w", encoding="utf-8") as f:
-        f.write(format_ir(ir))
-    print("IR guardado en:", ir_path)
+    ir_prog = IRGen().build(ast)
+    ir_txt = os.path.join(ir_dir, "program.ir.txt")
+    with open(ir_txt, "w", encoding="utf-8") as f:
+        f.write(format_ir(ir_prog))
+    print("IR guardado en:", ir_txt)
 
-    # x86
-    asm = X86Naive().compile(ir)
-    asm_dir = os.path.join(repo_root, "build", "asm")
-    os.makedirs(asm_dir, exist_ok=True)
-    asm_path = os.path.join(asm_dir, base + ".asm")
+    # x86 ASM (.asm)
+    asm_text = X86Naive().compile(ir_prog)
+    asm_path = os.path.join(asm_dir, f"{base}.asm")
     with open(asm_path, "w", encoding="utf-8") as f:
-        f.write(asm)
+        f.write(asm_text)
     print("ASM (x86) guardado en:", asm_path)
+
 
 if __name__ == "__main__":
     main()
