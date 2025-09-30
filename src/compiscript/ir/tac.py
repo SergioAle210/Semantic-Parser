@@ -7,9 +7,7 @@ if TYPE_CHECKING:
     from compiscript.codegen.frame import Frame
 
 
-# -------------------------
 # Operands
-# -------------------------
 class Operand:
     pass
 
@@ -39,9 +37,7 @@ class ConstStr(Operand):
     label: str  # etiqueta en .data
 
 
-# -------------------------
 # Instrucciones TAC
-# -------------------------
 class Instr:
     pass
 
