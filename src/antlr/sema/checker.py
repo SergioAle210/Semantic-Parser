@@ -674,22 +674,29 @@ class Checker:
         if tn == "Identifier":
             lhs_sym, _ = self.env.resolve(n.target.name)
             if lhs_sym is None:
-                self.err(n.loc, "Uso de variable no declarada: '" + n.target.name + "'")
-                lhs_t = T_UNKNOWN()
+                # ¿campo implícito de this?
+                cls = self.env.current_class_symbol()
+                fun = self.env.current_function_symbol()
+                if cls is not None and fun is not None and fun.is_method:
+                    mem = self.env.class_lookup_member(cls, n.target.name)
+                    if mem is not None:
+                        lhs_t = mem.typ if mem.typ is not None else T_UNKNOWN()
+                    else:
+                        self.err(n.loc, "Uso de variable no declarada: '" + n.target.name + "'")
+                        lhs_t = T_UNKNOWN()
+                else:
+                    self.err(n.loc, "Uso de variable no declarada: '" + n.target.name + "'")
+                    lhs_t = T_UNKNOWN()
             else:
                 if lhs_sym.kind == "const":
-                    self.err(
-                        n.loc, "No se puede asignar a const '" + lhs_sym.name + "'"
-                    )
+                    self.err(n.loc, "No se puede asignar a const '" + lhs_sym.name + "'")
                 lhs_t = lhs_sym.typ if lhs_sym.typ is not None else T_UNKNOWN()
+
         elif tn == "MemberAccess":
-            # LHS es acceso a campo: obj.name
-            # Resolvemos tipo del campo mirando la clase del objeto y el símbolo del miembro
+            # como ya tenías
             obj_t = self.visit(n.target.obj)
             if not is_class(obj_t):
-                self.err(
-                    n.loc, "Asignación a miembro sobre un valor no-clase: " + str(obj_t)
-                )
+                self.err(n.loc, "Asignación a miembro sobre un valor no-clase: " + str(obj_t))
                 lhs_t = T_UNKNOWN()
             else:
                 class_sym, _ = self.env.resolve(obj_t.info)
@@ -699,18 +706,14 @@ class Checker:
                 else:
                     mem = self.env.class_lookup_member(class_sym, n.target.name)
                     if mem is None:
-                        self.err(
-                            n.loc,
-                            "Miembro '"
-                            + n.target.name
-                            + "' no existe en clase "
-                            + obj_t.info,
-                        )
+                        self.err(n.loc, "Miembro '" + n.target.name + "' no existe en clase " + obj_t.info)
                         lhs_t = T_UNKNOWN()
                     else:
                         lhs_t = mem.typ if mem.typ is not None else T_UNKNOWN()
+
         elif tn == "IndexAccess":
             lhs_t = self.visit(n.target)
+
         else:
             self.err(n.loc, "Lado izquierdo de asignación inválido")
             lhs_t = T_UNKNOWN()
@@ -723,23 +726,14 @@ class Checker:
                 lhs_sym.inited = True
             else:
                 if not assignable(rhs_t, lhs_sym.typ):
-                    self.err(
-                        n.loc,
-                        "Asignación incompatible: "
-                        + str(rhs_t)
-                        + " → "
-                        + str(lhs_sym.typ),
-                    )
+                    self.err(n.loc, "Asignación incompatible: " + str(rhs_t) + " → " + str(lhs_sym.typ))
                 else:
                     lhs_sym.inited = True
+        else:
+            # LHS no es símbolo local/param; si conocemos su tipo declarado, validar compatibilidad
+            if not is_unknown(lhs_t) and not is_unknown(rhs_t) and not assignable(rhs_t, lhs_t):
+                self.err(n.loc, "Asignación incompatible: " + str(rhs_t) + " → " + str(lhs_t))
 
-        if lhs_sym is None and not is_unknown(lhs_t):
-            # Si el RHS queda 'unknown', no disparemos un falso positivo aquí;
-            # ya habría otros errores de contexto si realmente hay problema.
-            if not is_unknown(rhs_t) and not assignable(rhs_t, lhs_t):
-                self.err(
-                    n.loc, "Asignación incompatible: " + str(rhs_t) + " → " + str(lhs_t)
-                )
         return None
 
     # valida un if con condición booleana
@@ -803,11 +797,21 @@ class Checker:
     # resuelve un identificador y devuelve su tipo
     def visit_Identifier(self, n):
         sym, def_scope = self.env.resolve(n.name)
-        if sym is None:
-            self.err(n.loc, "Uso de variable no declarada: '" + n.name + "'")
-            return T_UNKNOWN()
-        self.env.note_capture_if_needed(def_scope, sym)
-        return sym.typ if sym.typ is not None else T_UNKNOWN()
+        if sym is not None:
+            self.env.note_capture_if_needed(def_scope, sym)
+            return sym.typ if sym.typ is not None else T_UNKNOWN()
+
+        # Fallback: ¿estamos dentro de un método de clase? => resolver como miembro implícito
+        cls = self.env.current_class_symbol()
+        fun = self.env.current_function_symbol()
+        if cls is not None and fun is not None and fun.is_method:
+            mem = self.env.class_lookup_member(cls, n.name)
+            if mem is not None:
+                return mem.typ if mem.typ is not None else T_UNKNOWN()
+
+        self.err(n.loc, "Uso de variable no declarada: '" + n.name + "'")
+        return T_UNKNOWN()
+
 
     #  mapea literales a tipos del sistema
     def visit_Literal(self, n):
