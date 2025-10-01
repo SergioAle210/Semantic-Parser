@@ -45,6 +45,7 @@ class X86Naive:
         self.lines.append("; Compiscript x86 (NASM, Intel syntax)")
         self.lines.append("extern printf")
         self.lines.append("extern malloc")
+        self.lines.append("extern __concat")
         self.lines.append("section .data")
 
     def _emit_data(self, prog: IRProgram):
@@ -150,8 +151,14 @@ class X86Naive:
         for ins in fn.body:
             self._emit_instr(frame, ins)
 
-        # Si no hubo return explícito, asegurar epílogo
-        self._emit_epilogue(frame, ensure=True)
+        # Epílogo solo si el último ins (no etiqueta) NO es Return
+        last = None
+        for ins in reversed(fn.body):
+            if not isinstance(ins, Label):
+                last = ins
+                break
+        if not isinstance(last, Return):
+            self._emit_epilogue(frame)
 
     def _emit_epilogue(self, frame: Frame, ensure: bool = False):
         # epílogo estándar
