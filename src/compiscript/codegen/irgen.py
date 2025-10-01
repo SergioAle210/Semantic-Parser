@@ -65,14 +65,21 @@ class IRGen:
         # función sintética para sentencias top-level
         self.toplevel: Optional[IRFunction] = None
 
+        # --- Tipado ligero / firmas para strings ---
+        self.func_ret: Dict[str, str] = {}                      # nombre de función -> "string"/"integer"/...
+        self.method_ret: Dict[Tuple[str, str], str] = {}        # (Clase, método) -> prim type
+        self.class_field_prim: Dict[str, Dict[str, str]] = {}   # Clase -> { campo -> "string"|... }
+        self.prim_scopes: List[Dict[str, str]] = []             # pila de scopes para tipos primitivos (por nombre)
 
     # ------------- helpers de scopes -------------
     def _push_scope(self):
         self.scopes.append({})
         self.type_scopes.append({})
+        self.prim_scopes.append({})
     def _pop_scope(self):
         self.scopes.pop()
         self.type_scopes.pop()
+        self.prim_scopes.pop()
     def _bind(self, name: str, op: Operand):
         assert self.scopes, "No hay scope activo"
         self.scopes[-1][name] = op
@@ -126,6 +133,67 @@ class IRGen:
         self.type_scopes = []
         self._push_scope()
 
+    def _bind_prim(self, name: str, typ: Optional[str]):
+        if typ:
+            self.prim_scopes[-1][name] = typ
+
+    def _lookup_prim(self, name: str) -> Optional[str]:
+        for m in reversed(self.prim_scopes):
+            if name in m:
+                return m[name]
+        return None
+
+    def _lookup_method_ret(self, cls: str, meth: str) -> Optional[str]:
+        c = cls
+        visited = set()
+        while c and c not in visited:
+            visited.add(c)
+            t = self.method_ret.get((c, meth))
+            if t:
+                return t
+            c = self.class_base.get(c)
+        return None
+
+    def _ast_is_string(self, e) -> bool:
+        if e is None:
+            return False
+        k = e.__class__.__name__
+        if k == "Literal":
+            return getattr(e, "kind", None) == "string"
+        if k == "Identifier":
+            return self._lookup_prim(e.name) == "string"
+        if k == "Binary" and getattr(e, "op", None) == "+":
+            return self._ast_is_string(e.left) or self._ast_is_string(e.right)
+        if k == "MemberAccess":
+            # this.campo o var.campo
+            obj = e.obj
+            field = e.name
+            cls = None
+            if obj.__class__.__name__ == "This":
+                cls = self.cur_class
+            elif obj.__class__.__name__ == "Identifier":
+                cls = self._lookup_type(obj.name)
+            if cls and cls in self.class_field_prim:
+                return self.class_field_prim[cls].get(field) == "string"
+            return False
+        if k == "Call":
+            callee = e.callee
+            cn = callee.__class__.__name__
+            if cn == "Identifier":
+                return self.func_ret.get(callee.name) == "string"
+            if cn == "MemberAccess":
+                # obj.metodo()
+                obj = callee.obj
+                meth = callee.name
+                cls = None
+                if obj.__class__.__name__ == "This":
+                    cls = self.cur_class
+                elif obj.__class__.__name__ == "Identifier":
+                    cls = self._lookup_type(obj.name)
+                if cls:
+                    return self._lookup_method_ret(cls, meth) == "string"
+        return False
+
 
     # ------------- API principal -------------
     def build(self, ast_root) -> IRProgram:
@@ -169,7 +237,14 @@ class IRGen:
 
     def _visit_FunctionDecl(self, n):
         fname = n.name
-        params = [p.name for p in (getattr(n, "params", []) or [])]
+
+        # Registrar tipo de retorno (para detectar concat de strings en _expr_Binary)
+        ret_ann = (getattr(n, "ret_type", None) or getattr(n, "type_ann", None))
+        if isinstance(ret_ann, str) and ret_ann.strip() == "string":
+            self.func_ret[fname] = "string"
+
+        ps = (getattr(n, "params", []) or [])
+        params = [p.name for p in ps]
         fn = IRFunction(name=fname, params=params)
         self.prog.functions[fname] = fn
         if fname == "main":
@@ -177,17 +252,19 @@ class IRGen:
 
         # guardar contexto actual
         prev_fn, prev_frame, prev_class = self.current_fn, self.frame, self.cur_class
-        prev_scopes, prev_types = self.scopes, self.type_scopes
+        prev_scopes, prev_types, prev_prims = self.scopes, self.type_scopes, self.prim_scopes
 
         # preparar contexto de la función
         self.current_fn, self.frame = fn, Frame(fname, params)
         self.cur_class = None
-        self.scopes = []
-        self.type_scopes = []
+        self.scopes, self.type_scopes, self.prim_scopes = [], [], []
         self._push_scope()
-        for p in params:
-            self._bind(p, Param(p))
-            self._bind_type(p, None)
+        for p in ps:
+            self._bind(p.name, Param(p.name))
+            self._bind_type(p.name, None)
+            ptyp = (getattr(p, "type_ann", None) or getattr(p, "type", None))
+            if isinstance(ptyp, str) and ptyp.strip() == "string":
+                self._bind_prim(p.name, "string")
 
         # cuerpo
         self._visit(n.body)
@@ -196,7 +273,8 @@ class IRGen:
         self._pop_scope()
         fn.frame = self.frame
         self.current_fn, self.frame, self.cur_class = prev_fn, prev_frame, prev_class
-        self.scopes, self.type_scopes = prev_scopes, prev_types
+        self.scopes, self.type_scopes, self.prim_scopes = prev_scopes, prev_types, prev_prims
+
 
     def _visit_Block(self, n):
         self._push_scope()
@@ -217,6 +295,10 @@ class IRGen:
         self._bind(name, loc)
         self._bind_type(name, None)
 
+        # Tipado primitivo si hay anotación
+        if getattr(n, "type_ann", None) and n.type_ann.strip() == "string":
+            self._bind_prim(name, "string")
+
         # init
         if getattr(n, "init", None) is not None:
             # Si es constructor Clase(...), rastrear el tipo
@@ -231,6 +313,11 @@ class IRGen:
                         ctor_class = cname
             val = self._eval_expr(n.init)
             self._emit(Move(loc, val))
+
+            # si el init es string, marcar la variable como string
+            if self._ast_is_string(n.init):
+                self._bind_prim(name, "string")
+
             if is_ctor and ctor_class:
                 self._bind_type(name, ctor_class)
 
@@ -459,20 +546,24 @@ class IRGen:
         base = getattr(n, "base_name", None)
         self.class_base[cname] = base
 
-        # 1) layout de campos: incluir primero los de la base (si hay)
+        # 1) layout de campos (+ herencia)
         base_fields = []
+        base_prim = {}
         if base and base in self.class_field_off:
-            # reconstruir la lista de campos de la base a partir del mapa
-            # (orden por offset)
             base_map = self.class_field_off[base]
             base_fields = [k for k,_ in sorted(base_map.items(), key=lambda kv: kv[1])]
+            base_prim = dict(self.class_field_prim.get(base, {}))
 
         own_fields: List[str] = []
+        own_prim: Dict[str, str] = {}
         i = 0
         while i < len(n.members):
             m = n.members[i]
             if m.__class__.__name__ in ("VarDecl", "ConstDecl"):
                 own_fields.append(m.name)
+                tann = getattr(m, "type_ann", None)
+                if isinstance(tann, str) and tann.strip() == "string":
+                    own_prim[m.name] = "string"
             i += 1
 
         fields = base_fields + own_fields
@@ -483,6 +574,10 @@ class IRGen:
             off += 4
         self.class_field_off[cname] = offmap
 
+        prim_map = dict(base_prim)
+        prim_map.update(own_prim)
+        self.class_field_prim[cname] = prim_map
+
         # 2) compilar métodos como funciones con primer param 'this'
         i = 0
         while i < len(n.members):
@@ -491,6 +586,12 @@ class IRGen:
                 mname = m.name
                 ir_name = f"{cname}__{mname}"
                 self.method_irname[(cname, mname)] = ir_name
+
+                # Registrar tipo de retorno del método (para _ast_is_string)
+                r = getattr(m, "ret_type", None) or getattr(m, "type_ann", None)
+                if isinstance(r, str) and r.strip() == "string":
+                    self.method_ret[(cname, mname)] = "string"
+
                 self._compile_method(cname, ir_name, m)
             i += 1
 
@@ -515,21 +616,25 @@ class IRGen:
 
         # guardar contexto actual (incluyendo scopes)
         prev_fn, prev_frame, prev_class = self.current_fn, self.frame, self.cur_class
-        prev_scopes, prev_types = self.scopes, self.type_scopes
+        prev_scopes, prev_types, prev_prims = self.scopes, self.type_scopes, self.prim_scopes
 
         # activar contexto del método
         self.current_fn, self.frame = fn, Frame(ir_name, params)
         self.cur_class = cname
-        self.scopes = []
-        self.type_scopes = []
+        self.scopes, self.type_scopes, self.prim_scopes = [], [], []
         self._push_scope()
 
         # bind this y parámetros
         self._bind("this", Param("this"))
         self._bind_type("this", cname)
-        for p in params[1:]:
-            self._bind(p, Param(p))
-            self._bind_type(p, None)
+
+        ps = (getattr(mdecl, "params", []) or [])
+        for p in ps:
+            self._bind(p.name, Param(p.name))
+            self._bind_type(p.name, None)
+            ptyp = (getattr(p, "type_ann", None) or getattr(p, "type", None))
+            if isinstance(ptyp, str) and ptyp.strip() == "string":
+                self._bind_prim(p.name, "string")
 
         # cuerpo
         self._visit(mdecl.body)
@@ -538,7 +643,7 @@ class IRGen:
         self._pop_scope()
         fn.frame = self.frame
         self.current_fn, self.frame, self.cur_class = prev_fn, prev_frame, prev_class
-        self.scopes, self.type_scopes = prev_scopes, prev_types
+        self.scopes, self.type_scopes, self.prim_scopes = prev_scopes, prev_types, prev_prims
 
 
     # ---------------- expresiones ----------------
@@ -639,13 +744,12 @@ class IRGen:
         raise NotImplementedError(f"Unary op {e.op} no soportado")
 
     def _expr_Binary(self, e) -> Operand:
-        # '+' especial: si cualquiera es ConstStr, llamar a __concat (opcional)
-        if e.op == "+" and (e.left.__class__.__name__ == "Literal" and e.left.kind == "string"
-                            or e.right.__class__.__name__ == "Literal" and e.right.kind == "string"):
+        # '+' de strings: reescribir SIEMPRE a __concat cuando algún lado es string
+        if e.op == "+" and (self._ast_is_string(e.left) or self._ast_is_string(e.right)):
             a = self._eval_expr(e.left)
             b = self._eval_expr(e.right)
             dst = Temp(self.tpool.new())
-            self._emit(Call(dst, "__concat", [a, b]))  # runtime opcional
+            self._emit(Call(dst, "__concat", [a, b]))  # __concat(a,b) respeta orden
             self._release_if_temp(a); self._release_if_temp(b)
             return dst
 
@@ -673,17 +777,14 @@ class IRGen:
             # init dst = 0
             self._emit(Move(dst, ConstInt(0)))
             if e.op == "&&":
-                # if !left goto false
                 self._emit_cond_jump(("NOT", e.left), L_false, L_true)
                 self._emit(Label(L_true))
-                # if !right goto false
                 L_true2 = self.lgen.new()
                 self._emit_cond_jump(("NOT", e.right), L_false, L_true2)
                 self._emit(Label(L_true2))
                 self._emit(Move(dst, ConstInt(1)))
                 self._emit(Jump(L_end))
             else:
-                # '||'
                 self._emit_cond_jump(e.left, L_true, L_false)
                 self._emit(Label(L_false))
                 self._emit_cond_jump(e.right, L_true, L_false)
@@ -691,11 +792,11 @@ class IRGen:
                 self._emit(Move(dst, ConstInt(1)))
                 self._emit(Jump(L_end))
             self._emit(Label(L_false))
-            # dst ya es 0
             self._emit(Label(L_end))
             return dst
 
         raise NotImplementedError(f"Binary op {e.op} no soportado")
+
 
 
     def _expr_Call(self, e) -> Operand:
