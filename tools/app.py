@@ -5,10 +5,10 @@ from typing import Any, Dict, List, Optional
 
 import streamlit as st
 import time
+import json
+import streamlit.components.v1 as components
 
-# -----------------------------
 # Detección robusta del ROOT
-# -----------------------------
 
 def _find_project_root() -> Path:
     p = Path(__file__).resolve().parent
@@ -52,9 +52,7 @@ from compiscript.ir.pretty import format_ir
 from compiscript.codegen.x86_naive import X86Naive
 
 
-# -----------------------------
 # Estilos y estado base
-# -----------------------------
 
 st.set_page_config(page_title="VSCompi+", layout="wide")
 
@@ -103,9 +101,9 @@ st.markdown('<div class="title">VSCompi+</div>', unsafe_allow_html=True)
 st.caption("IDE ligera para Compiscript — diagnósticos, AST, símbolos, quick-fixes y hover")
 
 
-# -----------------------------
+ 
 # Sidebar: selector de .cps + toggles
-# -----------------------------
+ 
 
 tests_dir = ROOT / "tests"
 examples_dir = ROOT / "examples"
@@ -155,9 +153,9 @@ if sel_sample != st.session_state.last_sample:
         st.sidebar.error("No se pudo cargar: " + str(ex))
 
 
-# -----------------------------
+ 
 # Helpers mini (sin regex/strip)
-# -----------------------------
+ 
 
 def _parse_sem_line(msg: str):
     if (len(msg) >= 4) and (msg[0] == "["):
@@ -367,9 +365,7 @@ def _tok_type_name(tid: int) -> str:
     return str(tid)
 
 
-# -----------------------------
 # IR/ASM: helpers
-# -----------------------------
 
 class _SyntaxErrorListener(ErrorListener):
     def __init__(self):
@@ -408,10 +404,33 @@ def build_ir_and_asm(src_code: str) -> tuple[str, str]:
     asm_text = X86Naive().compile(ir_prog)
     return ir_text, asm_text
 
+# --- Utilidad: copiar al portapapeles sin f-strings (evita llaves '{{}}' en JS) ---
 
-# -----------------------------
+def _copy_to_clipboard(text: str):
+    # Fallback robusto: primero execCommand('copy') sobre un <textarea> oculto,
+    # luego intenta Clipboard API. Evitamos f-strings para no chocar con llaves.
+    html = """
+    <textarea id=\"__copy_ta\" style=\"position:fixed; top:-10000px; left:-10000px; opacity:0\"></textarea>
+    <script>
+    (function() {
+      const txt = %s;
+      const ta = document.getElementById('__copy_ta');
+      ta.value = txt;
+      ta.focus();
+      ta.select();
+      try { document.execCommand('copy'); } catch (e) {}
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        try { navigator.clipboard.writeText(txt); } catch (e) {}
+      }
+    })();
+    </script>
+    """ % json.dumps(text)
+    components.html(html, height=0, width=0)
+
+
+ 
 # Layout: Editor + IR/ASM + Panel
-# -----------------------------
+ 
 
 left, right = st.columns([1.1, 0.9])
 
@@ -440,46 +459,29 @@ with left:
         st.caption("Auto: si está activado en la barra lateral, analiza al teclear.")
 
 with right:
-    st.subheader("IR & ASM")
-    # Botón para generar explícitamente IR/ASM
-    gen_ir_asm = st.button("Crear IR y ASM", help="Generar representación intermedia y ensamblador x86 a partir del código actual")
-    if gen_ir_asm:
-        try:
-            ir_text, asm_text = build_ir_and_asm(st.session_state.code)
-            st.session_state.ir_text = ir_text
-            st.session_state.asm_text = asm_text
-            st.success("IR y ASM generados correctamente.")
-        except Exception as ex:
-            st.error(str(ex))
+        st.markdown('<div class="panel">', unsafe_allow_html=True)
+        st.write("Opciones rápidas")
+        st.checkbox(
+            "Analizar automáticamente",
+            value=auto_analyze,
+            key="__aa",
+            help="Si lo activas, cada edición re-analiza el código.",
+        )
+        st.checkbox(
+            "Ocultar built-ins",
+            value=hide_builtins,
+            key="__hb",
+            help="No mostrar funciones built-in (ej. print) en la tabla de símbolos.",
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    # Cuadros de solo lectura
-    st.text_area("IR (TAC)", value=st.session_state.ir_text, height=260, key="__ir_box", disabled=True)
-    st.text_area("ASM (x86)", value=st.session_state.asm_text, height=260, key="__asm_box", disabled=True)
-
-    # Panel de opciones rápidas (se mantiene)
-    st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.write("Opciones rápidas")
-    st.checkbox(
-        "Analizar automáticamente",
-        value=auto_analyze,
-        key="__aa",
-        help="Si lo activas, cada edición re-analiza el código.",
-    )
-    st.checkbox(
-        "Ocultar built-ins",
-        value=hide_builtins,
-        key="__hb",
-        help="No mostrar funciones built-in (ej. print) en la tabla de símbolos.",
-    )
-    st.markdown("</div>", unsafe_allow_html=True)
-
-use_auto_flag = st.session_state.get("__aa", auto_analyze)
-hide_builtins = st.session_state.get("__hb", hide_builtins)
+        use_auto_flag = st.session_state.get("__aa", auto_analyze)
+        hide_builtins = st.session_state.get("__hb", hide_builtins)
 
 
-# -----------------------------
+ 
 # Análisis
-# -----------------------------
+ 
 
 result: Optional[Dict[str, Any]] = None
 do_analyze = bool(run_click) or bool(use_auto_flag)
@@ -495,9 +497,7 @@ if do_analyze:
         st.error("Error de análisis: " + str(ex))
 
 
-# -----------------------------
 # Resultados
-# -----------------------------
 
 lexsyn: List[Dict[str, Any]] = []
 sem: List[Dict[str, Any]] = []
@@ -567,6 +567,8 @@ if show_ast:
     tabs_labels.append("AST")
 if show_quickfix:
     tabs_labels.append("Quick-fixes")
+# Nueva pestaña para CI (IR) y ASM x86
+tabs_labels.append("CI / x86")
 if show_tokens:
     tabs_labels.append("Tokens")
 
@@ -777,6 +779,40 @@ if show_quickfix:
         else:
             st.dataframe(fixes, use_container_width=True)
     t += 1
+
+# ---- CI / x86 ----
+with tabs[t]:
+    st.subheader("CI (IR) y ASM (x86)")
+    if st.button("Crear CI y ASM", key="__gen_ci_asm_btn", help="Generar representación intermedia y ensamblador x86 a partir del código actual"):
+        try:
+            ir_text, asm_text = build_ir_and_asm(st.session_state.code)
+            st.session_state.ir_text = ir_text
+            st.session_state.asm_text = asm_text
+            st.success("CI/ASM generados correctamente.")
+        except Exception as ex:
+            st.error(str(ex))
+
+    # Fila CI (IR) ocupa mitad de la página; la otra mitad botón + mensaje
+    ci_code_col, ci_btn_col = st.columns(2)
+    with ci_code_col:
+        st.code(st.session_state.ir_text or "", language="text")
+    with ci_btn_col:
+        if st.button("Copiar CI", key="__copy_ci_btn"):
+            _copy_to_clipboard(st.session_state.ir_text)
+            st.success("CI copiado ✅")
+
+    # Fila ASM (x86) ocupa mitad de la página; la otra mitad botón + mensaje
+    asm_code_col, asm_btn_col = st.columns(2)
+    with asm_code_col:
+        st.code(st.session_state.asm_text or "", language="nasm")
+    with asm_btn_col:
+        if st.button("Copiar ASM", key="__copy_asm_btn_tab"):
+            _copy_to_clipboard(st.session_state.asm_text)
+            st.success("ASM copiado ✅")
+
+    
+
+t += 1
 
 # ---- Tokens ----
 if show_tokens:
