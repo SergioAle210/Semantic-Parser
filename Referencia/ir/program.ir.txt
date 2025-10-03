@@ -1,0 +1,137 @@
+; .strings
+;   str0: 
+;   str1: rojo
+;   str2: Hola, mi nombre es 
+;   str3: Ahora tengo 
+;   str4:  años.
+;   str5: rojo
+;   str6:  está estudiando en 
+;   str7:  grado.
+;   str8: 
+;   str9: Erick
+;   str10: \n
+;   str11: \n
+;   str12: \n
+;   str13:  es par\n
+;   str14:  es impar\n
+;   str15: Resultado de la expresión: 
+;   str16: \n
+;   str17: Promedio (entero): 
+;   str18: \n
+
+func toString(x)
+  return &str0
+endfunc
+
+func Persona__constructor(this, nombre, edad)
+  *(@this + 0) = @nombre
+  *(@this + 4) = @edad
+  *(@this + 8) = &str1
+endfunc
+
+func Persona__saludar(this)
+  %t0 = *(@this + 0)
+  %t1 = call __concat(&str2, %t0)
+  return %t1
+endfunc
+
+func Persona__incrementarEdad(this, anos)
+  %t0 = *(@this + 4)
+  %t2 = %t0 + @anos
+  *(@this + 4) = %t2
+  %t0 = *(@this + 4)
+  %t3 = call toString(%t0)
+  %t4 = call __concat(&str3, %t3)
+  %t3 = call __concat(%t4, &str4)
+  return %t3
+endfunc
+
+func Estudiante__constructor(this, nombre, edad, grado)
+  *(@this + 0) = @nombre
+  *(@this + 4) = @edad
+  *(@this + 8) = &str5
+  *(@this + 12) = @grado
+endfunc
+
+func Estudiante__estudiar(this)
+  %t4 = *(@this + 0)
+  %t5 = call __concat(%t4, &str6)
+  %t4 = *(@this + 12)
+  %t6 = call toString(%t4)
+  %t7 = call __concat(%t5, %t6)
+  %t6 = call __concat(%t7, &str7)
+  return %t6
+endfunc
+
+func Estudiante__promedioNotas(this, nota1, nota2, nota3)
+  ; locals: promedio
+  %t7 = @nota1 + @nota2
+  %t5 = %t7 + @nota3
+  %t7 = %t5 / 3
+  $promedio = %t7
+  return $promedio
+endfunc
+
+func __toplevel()
+  ; locals: log, nombre, juan, i, resultado, prom
+  $log = &str8
+  $nombre = &str9
+  %t5 = call malloc(16)
+  call Estudiante__constructor(%t5, $nombre, 20, 3)
+  $juan = %t5
+  %t8 = call Persona__saludar($juan)
+  %t9 = call __concat($log, %t8)
+  %t8 = call __concat(%t9, &str10)
+  $log = %t8
+  %t9 = call Estudiante__estudiar($juan)
+  %t10 = call __concat($log, %t9)
+  %t9 = call __concat(%t10, &str11)
+  $log = %t9
+  %t10 = call Persona__incrementarEdad($juan, 5)
+  %t11 = call __concat($log, %t10)
+  %t10 = call __concat(%t11, &str12)
+  $log = %t10
+  $i = 1
+L0:
+  if $i <= 5 goto L1 else L2
+L1:
+  %t11 = $i % 2
+  if %t11 == 0 goto L3 else L5
+L3:
+  %t11 = call toString($i)
+  %t12 = call __concat($log, %t11)
+  %t11 = call __concat(%t12, &str13)
+  $log = %t11
+  goto L4
+L5:
+  %t12 = call toString($i)
+  %t13 = call __concat($log, %t12)
+  %t12 = call __concat(%t13, &str14)
+  $log = %t12
+L4:
+  %t13 = $i + 1
+  $i = %t13
+  goto L0
+L2:
+  %t14 = *($juan + 4)
+  %t15 = %t14 * 2
+  %t14 = 5 - 3
+  %t16 = %t14 / 2
+  %t14 = %t15 + %t16
+  $resultado = %t14
+  %t16 = call __concat($log, &str15)
+  %t15 = call toString($resultado)
+  %t17 = call __concat(%t16, %t15)
+  %t15 = call __concat(%t17, &str16)
+  $log = %t15
+  $prom = 0
+  %t17 = call Estudiante__promedioNotas($juan, 90, 85, 95)
+  $prom = %t17
+  %t16 = call __concat($log, &str17)
+  %t18 = call toString($prom)
+  %t19 = call __concat(%t16, %t18)
+  %t18 = call __concat(%t19, &str18)
+  $log = %t18
+endfunc
+
+; entry: __toplevel
