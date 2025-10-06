@@ -1,5 +1,4 @@
-﻿# src/compiscript/cli.py
-import sys, os, shutil, subprocess
+﻿import sys, os, shutil, subprocess
 from antlr4 import FileStream, CommonTokenStream
 from antlr4.error.ErrorListener import ErrorListener
 
@@ -15,7 +14,7 @@ from antlr.sema.checker import Checker
 from compiscript.codegen.irgen import IRGen
 from compiscript.ir.pretty import format_ir
 from compiscript.codegen.x86_naive import X86Naive
-# from compiscript.codegen.ass_mips import MIPSNaive
+from compiscript.codegen.ass_mips import MIPSNaive
 
 
 class SyntaxErrorListener(ErrorListener):
@@ -102,17 +101,18 @@ def main():
     print("IR guardado en:", ir_txt)
 
     # x86 ASM (.asm)
-    asm_text = X86Naive().compile(ir_prog)
-    asm_path = os.path.join(asm_dir, f"{base}.asm")
-    with open(asm_path, "w", encoding="utf-8") as f:
-        f.write(asm_text)
-    print("ASM (x86) guardado en:", asm_path)
+    asm_text_x86 = X86Naive().compile(ir_prog)
+    asm_path_x86 = os.path.join(asm_dir, f"{base}.asm")
+    with open(asm_path_x86, "w", encoding="utf-8") as f:
+        f.write(asm_text_x86)
+    print("ASM (x86) guardado en:", asm_path_x86)
 
-#    asm_text = MIPSNaive().compile(ir_prog)
-#    asm_path = os.path.join(asm_dir, f"{base}.s")
-#    with open(asm_path, "w", encoding="utf-8") as f:
-#        f.write(asm_text)
-#    print("ASM (MIPS) guardado en:", asm_path)
+    # MIPS ASM (.s)  ← NUEVO
+    mips_text = MIPSNaive().compile(ir_prog)
+    mips_path = os.path.join(asm_dir, f"{base}.s")
+    with open(mips_path, "w", encoding="utf-8") as f:
+        f.write(mips_text)
+    print("ASM (MIPS) guardado en:", mips_path)
 
 
 if __name__ == "__main__":
