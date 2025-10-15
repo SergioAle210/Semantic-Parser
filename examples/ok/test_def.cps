@@ -1,13 +1,18 @@
 // --- Utilidad global ---
 function toString(x: integer): string {
+  // Stub: no convierte, lo evitamos usando printInteger cuando haga falta.
   return "";
 }
 
+// Helpers "declarados" en el lenguaje pero la implementación real la hace el backend MIPS.
+function printInteger(x: integer): integer { return x; }
+function printString(x: string): string { return x; }
+
 // --- Clase base ---
 class Persona {
-  let nombre: string = "";
-  let edad: integer = 5;
-  let color: string= "";
+  let nombre: string;
+  let edad: integer;
+  let color: string;
 
   function constructor(nombre: string, edad: integer) {
     this.nombre = nombre;
@@ -27,15 +32,14 @@ class Persona {
 
 // --- Clase derivada ---
 class Estudiante : Persona {
-  let grado: integer = 5;
+  let grado: integer;
 
-  // function constructor(nombre: string, edad: integer, grado: integer) {
-  function constructor(nombre: string, edad: integer) {
+  function constructor(nombre: string, edad: integer, grado: integer) {
     // No hay 'super': inicializamos campos heredados directamente
     this.nombre = nombre;
     this.edad = edad;
     this.color = "rojo";
-    // this.grado = grado;
+    this.grado = grado;
   }
 
   function estudiar(): string {
@@ -52,20 +56,43 @@ class Estudiante : Persona {
 let log: string = "";
 
 let nombre: string = "Erick";
-// let juan: Estudiante = new Estudiante(nombre, 20, 3);
-let juan: Estudiante = new Estudiante(nombre, 20);
+let juan: Estudiante = new Estudiante(nombre, 20, 3);
 
-// "Imprimir" = concatenar al log con saltos de línea
+// Seguimos armando 'log' por compatibilidad...
 log = log + juan.saludar() + "\n";
 log = log + juan.estudiar() + "\n";
 log = log + juan.incrementarEdad(5) + "\n";
+
+// ...pero AHORA sí imprimimos en consola con los helpers:
+
+// Saludo (no usa toString, así que se imprime bien tal cual):
+printString(juan.saludar() + "\n");
+
+// Estudiar: imprimimos el string base + el número con printInteger
+printString(juan.nombre + " está estudiando en ");
+printInteger(juan.grado);
+printString(" grado.\n");
+
+// Edad: tras incrementar, imprimimos el número por separado
+// (evitamos depender del toString stub)
+printString("Ahora tengo ");
+printInteger(juan.edad);
+printString(" años.\n");
 
 // Bucle (uso de while por compatibilidad)
 let i: integer = 1;
 while (i <= 5) {
   if ((i % 2) == 0) {
+    // "<i> es par"
+    printInteger(i);
+    printString(" es par\n");
+
     log = log + toString(i) + " es par\n";
   } else {
+    // "<i> es impar"
+    printInteger(i);
+    printString(" es impar\n");
+
     log = log + toString(i) + " es impar\n";
   }
   i = i + 1;
@@ -73,11 +100,24 @@ while (i <= 5) {
 
 // Expresión aritmética (entera)
 let resultado: integer = (juan.edad * 2) + ((5 - 3) / 2);
+
+// Mostramos "Resultado de la expresión: 51"
+printString("Resultado de la expresión: ");
+printInteger(resultado);
+printString("\n");
+
 log = log + "Resultado de la expresión: " + toString(resultado) + "\n";
 
 // Ejemplo de promedio (entero)
 let prom: integer = 0;
 prom = juan.promedioNotas(90, 85, 95);
+
+// Mostramos "Promedio (entero): 90"
+printString("Promedio (entero): ");
+printInteger(prom);
+printString("\n");
+
 log = log + "Promedio (entero): " + toString(prom) + "\n";
 
-// Nota: 'log' contiene todas las salidas.
+// Nota: 'log' sigue conteniendo todas las salidas "lógicas", pero
+// lo que realmente se verá en QtSpim es lo impreso con los helpers.
