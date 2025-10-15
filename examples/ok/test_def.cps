@@ -8,6 +8,17 @@ function toString(x: integer): string {
 function printInteger(x: integer): integer { return x; }
 function printString(x: string): string { return x; }
 
+// --- Recursividad: Fibonacci ---
+function fibonacci(n: integer): integer {
+  if (n <= 1) {
+    return n;
+  }
+  let a: integer = fibonacci(n - 1);
+  let b: integer = fibonacci(n - 2);
+  let r: integer = a + b;
+  return r;
+}
+
 // --- Clase base ---
 class Persona {
   let nombre: string;
@@ -55,7 +66,7 @@ class Estudiante : Persona {
 // --- Programa principal ---
 let log: string = "";
 
-let nombre: string = "Erick";
+let nombre: string = "Sergio";
 let juan: Estudiante = new Estudiante(nombre, 20, 3);
 
 // Seguimos armando 'log' por compatibilidad...
@@ -118,6 +129,20 @@ printInteger(prom);
 printString("\n");
 
 log = log + "Promedio (entero): " + toString(prom) + "\n";
+
+// --- Prueba: Fibonacci recursivo ---
+printString("Prueba: Fibonacci recursivo\n");
+let nFib: integer = 10;
+let k: integer = 0;
+while (k <= nFib) {
+  printString("Fib(");
+  printInteger(k);
+  printString(") = ");
+  let fk: integer = fibonacci(k);
+  printInteger(fk);
+  printString("\n");
+  k = k + 1;
+}
 
 // Nota: 'log' sigue conteniendo todas las salidas "lógicas", pero
 // lo que realmente se verá en QtSpim es lo impreso con los helpers.
