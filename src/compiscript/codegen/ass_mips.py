@@ -45,6 +45,7 @@ class MIPSNaive:
         self._w(".data")
         # strings del programa como bytes (incluye NUL)
         for lab, b in prog.strings.items():
+            b = self._normalize_string_bytes(list(b))
             bs = ", ".join(str(x) for x in b)
             self._w(f"{lab}: .byte {bs}")
         self._w("")
@@ -98,6 +99,42 @@ class MIPSNaive:
             self._w(f"  sw {reg}, {self._addr(frame, dst)}")
         else:
             raise RuntimeError("Destino no soportado para store")
+
+    def _normalize_string_bytes(self, b: List[int]) -> List[int]:
+        """
+        Convierte secuencias de escape estilo '\\n' en su byte real (LF=10),
+        para que syscall 4 imprima saltos de línea reales.
+        También maneja '\\\\' (backslash literal) y '\\t' (tab).
+        No toca los bytes ya-correctos (por ej. 10) ni otras secuencias.
+        """
+        out: List[int] = []
+        i = 0
+        n = len(b)
+        while i < n:
+            cur = b[i]
+            if cur == 92 and i + 1 < n:  # 92 = '\\'
+                nxt = b[i + 1]
+                if nxt == 110:           # 'n'
+                    out.append(10)       # LF
+                    i += 2
+                    continue
+                if nxt == 116:           # 't'
+                    out.append(9)        # TAB
+                    i += 2
+                    continue
+                if nxt == 92:            # '\\'
+                    out.append(92)       # backslash literal
+                    i += 2
+                    continue
+                # Cualquier otro: dejamos el backslash y seguimos
+                out.append(92)
+                i += 1
+            else:
+                out.append(cur)
+                i += 1
+        # (Opcional) asegurar NUL final si tu IR no lo garantiza:
+        # if not out or out[-1] != 0: out.append(0)
+        return out
 
     # ---------- función ----------
     def _emit_function(self, fn: IRFunction, is_entry: bool):
