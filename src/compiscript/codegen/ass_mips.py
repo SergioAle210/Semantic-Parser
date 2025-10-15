@@ -17,6 +17,8 @@ class MIPSNaive:
       - Callee guarda $fp/$ra y usa $fp como marco.
       - Locales/temps: -offset($fp). Params: (offset-8)($fp).
     """
+    SAVE_AREA = 8
+
     def __init__(self):
         self.lines: List[str] = []
         self.temp_slots: Dict[str, int] = {}
@@ -60,25 +62,29 @@ class MIPSNaive:
     def _lbl(self, s: str): self._w(f"{s}:")
 
     def _addr(self, frame: Frame, op: Operand) -> str:
-        # Devuelve desplazamiento($fp)
         if isinstance(op, Local):
             off = frame.get_local_disp(op.name)
-            if off is None: off = frame.ensure_local(op.name)
-            return f"-{off}($fp)"
+            if off is None:
+                off = frame.ensure_local(op.name)
+            return f"-{off + self.SAVE_AREA}($fp)"
+
         if isinstance(op, Temp):
             off = self.temp_slots.get(op.name)
             if off is None:
                 off = frame.ensure_local(f"__t_{op.name}")
                 self.temp_slots[op.name] = off
-            return f"-{off}($fp)"
+            return f"-{off + self.SAVE_AREA}($fp)"
+
         if isinstance(op, Param):
             off = frame.get_param_disp(op.name)
             if off is None:
                 raise RuntimeError(f"Param sin offset: {op.name}")
-            # Ajuste: en nuestro prólogo $fp queda igual a SP de entrada → param0 = 0($fp)
-            return f"{off - 8}($fp)"
-        raise RuntimeError(f"Operando no direccionable: {op}")
+            # En nuestro prólogo $fp=sp0, así que param0 = 0($fp), param1 = 4($fp)...
+            # El Frame trae +8 (x86), por eso restamos 8.
+            return f"{off - self.SAVE_AREA}($fp)"
 
+        raise RuntimeError(f"Operando no direccionable: {op}")
+    
     def _load_reg(self, frame: Frame, reg: str, op: Operand):
         if isinstance(op, ConstInt):
             self._w(f"  li {reg}, {op.value}")
@@ -328,6 +334,35 @@ class MIPSNaive:
 
         if isinstance(ins, Call):
             # print -> syscalls (int=1 / string=4) + '\n' (11)
+            if ins.func == "printInteger":
+                arg = ins.args[0] if len(ins.args) >= 1 else None
+                if arg is not None:
+                    self._load_reg(frame, "$a0", arg)   # carga int en $a0
+                else:
+                    self._w("  move $a0, $zero")
+                self._w("  li $v0, 1")                   # syscall print_int
+                self._w("  syscall")
+                # retorno = entero impreso (identidad)
+                if ins.dst is not None:
+                    self._w("  move $v0, $a0")
+                    self._store_from_reg(frame, ins.dst, "$v0")
+                return
+
+            if ins.func == "printString":
+                arg = ins.args[0] if len(ins.args) >= 1 else None
+                if arg is not None:
+                    self._load_reg(frame, "$a0", arg)   # la/ lw según ConstStr/Local/etc.
+                else:
+                    self._w("  move $a0, $zero")
+                self._w("  li $v0, 4")                   # syscall print_string
+                self._w("  syscall")
+                # retorno = puntero impreso (identidad)
+                if ins.dst is not None:
+                    self._w("  move $v0, $a0")
+                    self._store_from_reg(frame, ins.dst, "$v0")
+                return
+
+            # ---- Caso legado: print (imprime y agrega '\n') ----
             if ins.func == "print":
                 arg = ins.args[0] if len(ins.args) == 1 else None
                 if isinstance(arg, ConstStr):
@@ -351,7 +386,6 @@ class MIPSNaive:
             # malloc -> syscall 9 (sbrk)
             if ins.func == "malloc":
                 if len(ins.args) != 1:
-                    # si no cumple, hacemos llamada genérica
                     self._emit_generic_call(frame, ins); return
                 self._load_reg(frame, "$a0", ins.args[0])
                 self._w("  li $v0, 9")
