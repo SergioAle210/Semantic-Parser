@@ -13,6 +13,7 @@ from antlr.sema.checker import Checker
 
 from compiscript.codegen.irgen import IRGen
 from compiscript.ir.pretty import format_ir
+from compiscript.ir.optimize import optimize_program
 from compiscript.codegen.x86_naive import X86Naive
 from compiscript.codegen.ass_mips import MIPSNaive
 
@@ -95,20 +96,28 @@ def main():
 
     # IR
     ir_prog = IRGen().build(ast)
+    # 1) Guardar IR "tal cual" (sin optimizar)
     ir_txt = os.path.join(ir_dir, "program.ir.txt")
     with open(ir_txt, "w", encoding="utf-8") as f:
         f.write(format_ir(ir_prog))
-    print("IR guardado en:", ir_txt)
+    print("IR (sin optimizar) guardado en:", ir_txt)
+
+    # 2) Optimizar y guardar IR optimizado
+    ir_prog_opt = optimize_program(ir_prog)   # nota: modifica en sitio y retorna prog
+    ir_txt_op = os.path.join(ir_dir, "program_op.ir.txt")
+    with open(ir_txt_op, "w", encoding="utf-8") as f:
+        f.write(format_ir(ir_prog_opt))
+    print("IR optimizado guardado en:", ir_txt_op)
 
     # x86 ASM (.asm)
-    asm_text_x86 = X86Naive().compile(ir_prog)
+    asm_text_x86 = X86Naive().compile(ir_prog_opt)
     asm_path_x86 = os.path.join(asm_dir, f"{base}.asm")
     with open(asm_path_x86, "w", encoding="utf-8") as f:
         f.write(asm_text_x86)
     print("ASM (x86) guardado en:", asm_path_x86)
 
     # MIPS ASM (.s)  ← NUEVO
-    mips_text = MIPSNaive().compile(ir_prog)
+    mips_text = MIPSNaive().compile(ir_prog_opt)
     mips_path = os.path.join(asm_dir, f"{base}.s")
     with open(mips_path, "w", encoding="utf-8") as f:
         f.write(mips_text)
