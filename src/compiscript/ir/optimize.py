@@ -512,10 +512,32 @@ def _pool_strings(prog: IRProgram) -> None:
 
     # 4) Filtrar prog.strings: conservamos sólo labels canónicos en uso
     if used:
+        # Orden estable: por sufijo numérico si es 'strN', luego por nombre
+        def _num_suffix(lab: str):
+            if lab.startswith("str"):
+                s = lab[3:]
+                if s.isdigit():
+                    return int(s)
+            return 10**9  # manda al final lo no numérico
+        ordered = sorted(used, key=lambda lab: (_num_suffix(lab), lab))
+
+        # Mapeo old->new
+        ren = {old: f"str{i}" for i, old in enumerate(ordered)}
+
+        # Reescribe todas las ocurrencias en el IR
+        def map_str2(label: str) -> str:
+            return ren.get(label, label)
+
+        for fn in prog.functions.values():
+            fn.body = [_rewrite_operands(ins, map_temp=None, map_str=map_str2)
+                       for ins in fn.body]
+
+        # Reconstruye prog.strings con NUEVOS nombres y en BYTES
         new_strings: Dict[str, bytes] = {}
-        for lab, bs in prog.strings.items():
-            if lab in used:
-                new_strings[lab] = bytes(bs)
+        for old_lab, bs in prog.strings.items():
+            if old_lab in used:
+                payload = bs if isinstance(bs, (bytes, bytearray)) else bytes(bs)
+                new_strings[ren.get(old_lab, old_lab)] = payload
         prog.strings = new_strings
     else:
         # En programas sin strings, vaciar (por si venía algo huérfano).

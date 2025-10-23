@@ -67,7 +67,7 @@ class Estudiante : Persona {
 let log: string = "";
 
 let nombre: string = "Sergio";
-let juan: Estudiante = new Estudiante(nombre, 20, 3);
+let juan: Estudiante = new Estudiante(nombre, 15, 3);
 
 // Seguimos armando 'log' por compatibilidad...
 log = log + juan.saludar() + "\n";
@@ -145,4 +145,3 @@ while (k <= nFib) {
 }
 
 // Nota: 'log' sigue conteniendo todas las salidas "lógicas", pero
-// lo que realmente se verá en QtSpim es lo impreso con los helpers.
