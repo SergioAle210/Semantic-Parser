@@ -23,9 +23,21 @@ class MIPSNaive:
         self.lines: List[str] = []
         self.temp_slots: Dict[str, int] = {}
 
-    # ---------- API principal ----------
+    #  API principal 
     def compile(self, prog: IRProgram) -> str:
         self.lines = []
+
+        # 1) Intentar optimizar con módulo externo (único optimizador del proyecto)
+        try:
+            import compiscript.ir.optimize as opt
+        except Exception:
+            opt = None
+        if opt and hasattr(opt, "optimize_program"):
+            result = opt.optimize_program(prog)
+            if result is not None:
+                prog = result
+
+        # 2) Emitir
         self._emit_header()
         self._emit_data(prog)
         self._emit_text(prog)
@@ -37,7 +49,7 @@ class MIPSNaive:
             self._emit_main_wrapper(entry)
         return "\n".join(self.lines)
 
-    # ---------- secciones ----------
+    #  secciones 
     def _emit_header(self):
         self._w("# Compiscript MIPS (o32)")
 
@@ -58,7 +70,7 @@ class MIPSNaive:
         for fname, fn in prog.functions.items():
             self._emit_function(fn, is_entry=(prog.entry == fname))
 
-    # ---------- utils ----------
+    #  utils 
     def _w(self, s: str): self.lines.append(s)
     def _lbl(self, s: str): self._w(f"{s}:")
 
@@ -100,43 +112,7 @@ class MIPSNaive:
         else:
             raise RuntimeError("Destino no soportado para store")
 
-    def _normalize_string_bytes(self, b: List[int]) -> List[int]:
-        """
-        Convierte secuencias de escape estilo '\\n' en su byte real (LF=10),
-        para que syscall 4 imprima saltos de línea reales.
-        También maneja '\\\\' (backslash literal) y '\\t' (tab).
-        No toca los bytes ya-correctos (por ej. 10) ni otras secuencias.
-        """
-        out: List[int] = []
-        i = 0
-        n = len(b)
-        while i < n:
-            cur = b[i]
-            if cur == 92 and i + 1 < n:  # 92 = '\\'
-                nxt = b[i + 1]
-                if nxt == 110:           # 'n'
-                    out.append(10)       # LF
-                    i += 2
-                    continue
-                if nxt == 116:           # 't'
-                    out.append(9)        # TAB
-                    i += 2
-                    continue
-                if nxt == 92:            # '\\'
-                    out.append(92)       # backslash literal
-                    i += 2
-                    continue
-                # Cualquier otro: dejamos el backslash y seguimos
-                out.append(92)
-                i += 1
-            else:
-                out.append(cur)
-                i += 1
-        # (Opcional) asegurar NUL final si tu IR no lo garantiza:
-        # if not out or out[-1] != 0: out.append(0)
-        return out
-
-    # ---------- función ----------
+    #  función 
     def _emit_function(self, fn: IRFunction, is_entry: bool):
         self.temp_slots.clear()
         frame = fn.frame or Frame(fn.name, fn.params)
@@ -198,7 +174,7 @@ class MIPSNaive:
         self._w("  jr $ra")
         self._w("  nop")
 
-    # ---------- instrucciones ----------
+    #  instrucciones 
     def _emit_instr(self, frame: Frame, ins: Instr, lsize: int):
         if isinstance(ins, Label):
             self._lbl(ins.name); return
@@ -248,6 +224,7 @@ class MIPSNaive:
             return
 
         if isinstance(ins, BinOp):
+            # Caso general (sin micro‑opts: el IR ya viene optimizado)
             self._load_reg(frame, "$t0", ins.a)
             self._load_reg(frame, "$t1", ins.b)
             if ins.op == "+": self._w("  addu $t0, $t0, $t1")
@@ -332,16 +309,16 @@ class MIPSNaive:
             return
 
         if isinstance(ins, LoadI):
-            self._load_reg(frame, "$t0", ins.base)  # base
+            self._load_reg(frame, "$t0", ins.base)      # base
             if isinstance(ins.index, ConstInt):
                 byte_off = 4 + ins.index.value * 4
                 self._w(f"  lw $t1, {byte_off}($t0)")
                 self._store_from_reg(frame, ins.dst, "$t1")
             else:
-                self._load_reg(frame, "$t1", ins.index)   # idx
-                self._w("  sll $t1, $t1, 2")             # idx*4
-                self._w("  addu $t1, $t1, $t0")          # base + idx*4
-                self._w("  lw $t2, 4($t1)")              # *(base + 4 + idx*4)
+                self._load_reg(frame, "$t1", ins.index) # idx
+                self._w("  sll $t1, $t1, 2")            # idx*4
+                self._w("  addu $t1, $t1, $t0")         # base + idx*4
+                self._w("  lw $t2, 4($t1)")             # *(base + 4 + idx*4)
                 self._store_from_reg(frame, ins.dst, "$t2")
             return
 
@@ -456,7 +433,7 @@ class MIPSNaive:
         if ins.dst is not None:
             self._store_from_reg(frame, ins.dst, "$v0")
 
-    # ---------- runtime auxiliar ----------
+    #  runtime auxiliar 
     def _emit_runtime_concat(self):
         self._w(".globl __concat")
         self._lbl("__concat")
@@ -536,3 +513,36 @@ class MIPSNaive:
         # salir limpiamente
         self._w("  li $v0, 10   # exit")
         self._w("  syscall")
+
+    def _normalize_string_bytes(self, b: List[int]) -> List[int]:
+        """
+        Convierte secuencias de escape estilo '\\n' en su byte real (LF=10),
+        para que syscall 4 imprima saltos de línea reales.
+        También maneja '\\\\' (backslash literal) y '\\t' (tab).
+        No toca los bytes ya-correctos (por ej. 10) ni otras secuencias.
+        """
+        out: List[int] = []
+        i = 0
+        n = len(b)
+        while i < n:
+            cur = b[i]
+            if cur == 92 and i + 1 < n:  # 92 = '\\'
+                nxt = b[i + 1]
+                if nxt == 110:           # 'n'
+                    out.append(10)       # LF
+                    i += 2
+                    continue
+                if nxt == 116:           # 't'
+                    out.append(9)        # TAB
+                    i += 2
+                    continue
+                if nxt == 92:            # '\\'
+                    out.append(92)       # backslash literal
+                    i += 2
+                    continue
+                out.append(92)
+                i += 1
+            else:
+                out.append(cur)
+                i += 1
+        return out
