@@ -1,14 +1,12 @@
-// --- Utilidad global ---
+// Helpers "declarados" en el lenguaje; la implementación real la hace el backend MIPS.
 function toString(x: integer): string {
-  // Stub: no convierte, lo evitamos usando printInteger cuando haga falta.
   return "";
 }
 
-// Helpers "declarados" en el lenguaje pero la implementación real la hace el backend MIPS.
 function printInteger(x: integer): integer { return x; }
 function printString(x: string): string { return x; }
 
-// --- Recursividad: Fibonacci ---
+// Recursividad: Fibonacci
 function fibonacci(n: integer): integer {
   if (n <= 1) {
     return n;
@@ -19,7 +17,7 @@ function fibonacci(n: integer): integer {
   return r;
 }
 
-// --- Clase base ---
+// Clase base
 class Persona {
   let nombre: string;
   let edad: integer;
@@ -41,7 +39,7 @@ class Persona {
   }
 }
 
-// --- Clase derivada ---
+// Clase derivada
 class Estudiante : Persona {
   let grado: integer;
 
@@ -54,94 +52,69 @@ class Estudiante : Persona {
   }
 
   function estudiar(): string {
-    return this.nombre + " está estudiando en " + toString(this.grado) + " grado.";
+    return this.nombre + " está estudiando en " + toString(this.grado) + " año en la Universidad del Valle de Guatemala (UVG).";
   }
 
-  function promedioNotas(nota1: integer, nota2: integer, nota3: integer): integer {
-    let promedio: integer = (nota1 + nota2 + nota3) / 3; // división entera
+  function promedioNotas(n1: integer, n2: integer, n3: integer, n4: integer, n5: integer, n6: integer): integer {
+    let promedio: integer = (n1 + n2 + n3 + n4 + n5 + n6) / 6; // división entera
     return promedio;
   }
 }
 
-// --- Programa principal ---
+// Programa principal
 let log: string = "";
 
 let nombre: string = "Sergio";
-let juan: Estudiante = new Estudiante(nombre, 15, 3);
+let sergio: Estudiante = new Estudiante(nombre, 15, 4);
 
-// Seguimos armando 'log' por compatibilidad...
-log = log + juan.saludar() + "\n";
-log = log + juan.estudiar() + "\n";
-log = log + juan.incrementarEdad(5) + "\n";
+let nombre1: string = "Andre";
+let andre: Estudiante = new Estudiante(nombre1, 15, 4);
 
-// ...pero AHORA sí imprimimos en consola con los helpers:
+let nombre2: string = "Rodrigo";
+let rodri: Estudiante = new Estudiante(nombre2, 15, 4);
 
-// Saludo (no usa toString, así que se imprime bien tal cual):
-printString(juan.saludar() + "\n");
+// Cabecera y acciones básicas
+log = log + sergio.saludar() + "\n";
+log = log + sergio.estudiar() + "\n";
+log = log + sergio.incrementarEdad(6) + "\n";
 
-// Estudiar: imprimimos el string base + el número con printInteger
-printString(juan.nombre + " está estudiando en ");
-printInteger(juan.grado);
-printString(" grado.\n");
+log = log + andre.saludar() + "\n";
+log = log + andre.estudiar() + "\n";
+log = log + andre.incrementarEdad(7) + "\n";
 
-// Edad: tras incrementar, imprimimos el número por separado
-// (evitamos depender del toString stub)
-printString("Ahora tengo ");
-printInteger(juan.edad);
-printString(" años.\n");
+log = log + rodri.saludar() + "\n";
+log = log + rodri.estudiar() + "\n";
+log = log + rodri.incrementarEdad(6) + "\n";
 
-// Bucle (uso de while por compatibilidad)
+// Bucle (solo a log, sin imprimir en caliente)
 let i: integer = 1;
-while (i <= 5) {
+while (i <= 12) {
   if ((i % 2) == 0) {
-    // "<i> es par"
-    printInteger(i);
-    printString(" es par\n");
-
     log = log + toString(i) + " es par\n";
   } else {
-    // "<i> es impar"
-    printInteger(i);
-    printString(" es impar\n");
-
     log = log + toString(i) + " es impar\n";
   }
   i = i + 1;
 }
 
 // Expresión aritmética (entera)
-let resultado: integer = (juan.edad * 2) + ((5 - 3) / 2);
-
-// Mostramos "Resultado de la expresión: 51"
-printString("Resultado de la expresión: ");
-printInteger(resultado);
-printString("\n");
-
+let resultado: integer = (sergio.edad * 2) + ((5 - 3) / 2);
 log = log + "Resultado de la expresión: " + toString(resultado) + "\n";
 
-// Ejemplo de promedio (entero)
+// Promedio (entero)
 let prom: integer = 0;
-prom = juan.promedioNotas(90, 85, 95);
-
-// Mostramos "Promedio (entero): 90"
-printString("Promedio (entero): ");
-printInteger(prom);
-printString("\n");
-
+prom = sergio.promedioNotas(99, 95, 98, 100, 95, 94);
 log = log + "Promedio (entero): " + toString(prom) + "\n";
 
-// --- Prueba: Fibonacci recursivo ---
-printString("Prueba: Fibonacci recursivo\n");
-let nFib: integer = 10;
+// Prueba: Fibonacci recursivo
+log = log + "Prueba: Fibonacci recursivo\n";
+let nFib: integer = 20;
 let k: integer = 0;
 while (k <= nFib) {
-  printString("Fib(");
-  printInteger(k);
-  printString(") = ");
   let fk: integer = fibonacci(k);
-  printInteger(fk);
-  printString("\n");
+  log = log + "Fib(" + toString(k) + ") = " + toString(fk) + "\n";
   k = k + 1;
 }
 
-// Nota: 'log' sigue conteniendo todas las salidas "lógicas", pero
+// ÚNICA salida a consola
+printString(log);
