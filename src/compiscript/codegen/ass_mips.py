@@ -347,6 +347,85 @@ class MIPSNaive:
             return
 
         if isinstance(ins, Call):
+            # --- Intrínseco: toString(int) -> string ---
+            if ins.func == "toString":
+                # Cargar arg en $t0
+                arg = ins.args[0] if len(ins.args) >= 1 else None
+                if arg is not None:
+                    self._load_reg(frame, "$t0", arg)
+                else:
+                    self._w("  move $t0, $zero")
+
+                # Reservar 12 bytes: signo + 10 dígitos + NUL
+                self._w("  li $a0, 12")
+                self._w("  li $v0, 9")  # sbrk
+                self._w("  syscall")
+                self._w("  move $t3, $v0    # buf base")
+
+                # $t2 apunta al final y escribimos NUL
+                self._w("  addiu $t2, $t3, 12")
+                self._w("  addiu $t2, $t2, -1")
+                self._w("  sb $zero, 0($t2)")
+
+                Lzero = f"itoa_zero_{id(ins)}"
+                Lneg  = f"itoa_neg_{id(ins)}"
+                Lloop = f"itoa_loop_{id(ins)}"
+                Ldone = f"itoa_done_{id(ins)}"
+                Lpos  = f"itoa_pos_{id(ins)}"
+                Lend  = f"itoa_end_{id(ins)}"
+
+                # x == 0 ? -> "0"
+                self._w(f"  beq $t0, $zero, {Lzero}")
+
+                # signflag en $t6 (1 si negativo)
+                self._w("  slt $t6, $t0, $zero")      # $t6 = 1 si $t0 < 0
+                self._w(f"  bne $t6, $zero, {Lneg}")
+                # positivo
+                self._w("  move $t5, $t0")            # $t5 = valor positivo
+                self._w(f"  j {Lpos}"); self._w("  nop")
+
+                # negativo: $t5 = -$t0
+                self._w(f"{Lneg}:")
+                self._w("  subu $t5, $zero, $t0")
+
+                # conversión (común) - escribir dígitos de derecha a izquierda
+                self._w(f"{Lpos}:")
+                self._w("  li $t4, 10")
+                self._w(f"{Lloop}:")
+                self._w("  div $t5, $t4")
+                self._w("  mfhi $t7          # rem = $t5 % 10")
+                self._w("  mflo $t5          # $t5 = $t5 / 10")
+                self._w("  addiu $t7, $t7, 48 # '0' + rem")
+                self._w("  addiu $t2, $t2, -1")
+                self._w("  sb $t7, 0($t2)")
+                self._w(f"  bne $t5, $zero, {Lloop}")
+
+                # si era negativo, prepende '-'
+                self._w(f"  beq $t6, $zero, {Ldone}")
+                self._w("  addiu $t2, $t2, -1")
+                self._w("  li $t7, 45        # '-'")
+                self._w("  sb $t7, 0($t2)")
+
+                # listo: retorno en $v0
+                self._w(f"{Ldone}:")
+                self._w("  move $v0, $t2")
+                self._w(f"  j {Lend}")
+                self._w("  nop")
+
+                # caso x == 0 -> "0"
+                self._w(f"{Lzero}:")
+                self._w("  addiu $t2, $t2, -1")
+                self._w("  li $t7, 48")      # '0'
+                self._w("  sb $t7, 0($t2)")
+                self._w("  move $v0, $t2")
+
+                # unir y almacenar el dst si aplica
+                self._w(f"{Lend}:")
+                if ins.dst is not None:
+                    self._store_from_reg(frame, ins.dst, "$v0")
+                return
+
+
             # print -> syscalls (int=1 / string=4) + '\n' (11)
             if ins.func == "printInteger":
                 arg = ins.args[0] if len(ins.args) >= 1 else None
