@@ -63,6 +63,7 @@ class Estudiante : Persona {
 
 // Programa principal
 let log: string = "";
+let fibo: string = "";
 
 let nombre: string = "Sergio";
 let sergio: Estudiante = new Estudiante(nombre, 15, 4);
@@ -108,13 +109,14 @@ log = log + "Promedio (entero): " + toString(prom) + "\n";
 
 // Prueba: Fibonacci recursivo
 log = log + "Prueba: Fibonacci recursivo\n";
-let nFib: integer = 20;
+printString(log);
+
+let nFib: integer = 40;
 let k: integer = 0;
 while (k <= nFib) {
   let fk: integer = fibonacci(k);
-  log = log + "Fib(" + toString(k) + ") = " + toString(fk) + "\n";
+  fibo = "Fib(" + toString(k) + ") = " + toString(fk) + "\n";
+  printString(fibo);
   k = k + 1;
 }
 
-// ÚNICA salida a consola
-printString(log);
