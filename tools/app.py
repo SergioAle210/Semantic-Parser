@@ -54,6 +54,7 @@ from compiscript.ir.pretty import format_ir
 # --- Cambiado: x86 -> MIPS ---
 # from compiscript.codegen.x86_naive import X86Naive
 from compiscript.codegen.ass_mips import MIPSNaive
+from compiscript.ir.optimize import optimize_program
 
 # Estilos y estado base
 
@@ -406,7 +407,10 @@ class _SyntaxErrorListener(ErrorListener):
 
 
 def build_ir_and_mips(src_code: str) -> tuple[str, str]:
-    """Parsea + chequea + genera IR y ASM (MIPS). Lanza excepción con mensajes si hay errores."""
+    """
+    Parsea + chequea + genera IR optimizado y MIPS.
+    Devuelve (ir_text, mips_text).
+    """
     inp = InputStream(src_code)
     lexer = CompiscriptLexer(inp)
     tokens = CommonTokenStream(lexer)
@@ -425,14 +429,25 @@ def build_ir_and_mips(src_code: str) -> tuple[str, str]:
     checker = Checker()
     checker.run(ast)
     if len(checker.errors) > 0:
-        # Normalizamos a string simple por línea
         raise ValueError("Errores semánticos:\n" + "\n".join(checker.errors))
 
+    # IR → optimización
     ir_prog = IRGen().build(ast)
-    ir_text = format_ir(ir_prog)
+    ir_prog_opt = optimize_program(ir_prog)
 
-    # Generar MIPS (el backend ya intenta optimizar internamente)
-    mips_text = MIPSNaive().compile(ir_prog)
+    # Seguridad: si algún pase dejó listas de bytes, normalízalas a bytes reales
+    # (format_ir espera bytes)
+    if isinstance(ir_prog_opt.strings, dict):
+        ir_prog_opt.strings = {
+            k: (bytes(v) if isinstance(v, (list, tuple)) else v)
+            for k, v in ir_prog_opt.strings.items()
+        }
+
+    ir_text = format_ir(ir_prog_opt)
+    mips_text = MIPSNaive().compile(
+        ir_prog_opt
+    )  # el backend también optimiza si está disponible
+
     return ir_text, mips_text
 
 
@@ -849,7 +864,7 @@ with tabs[t]:
     if st.button(
         "Generar IR y MIPS",
         key="__gen_ci_mips_btn_ir",
-        help="Generar representación intermedia y ensamblador MIPS a partir del código actual",
+        help="Generar representación intermedia optimizada y ensamblador MIPS a partir del código actual",
     ):
         try:
             ir_text, mips_text = build_ir_and_mips(st.session_state.code)
