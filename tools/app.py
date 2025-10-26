@@ -10,6 +10,7 @@ import streamlit.components.v1 as components
 
 # Detección robusta del ROOT
 
+
 def _find_project_root() -> Path:
     p = Path(__file__).resolve().parent
     steps = 0
@@ -37,7 +38,7 @@ if str(TOOLS) not in sys.path:
 
 from analysis_core import analyze_internal, suggest_fixes, hover_at  # noqa
 
-# ANTLR y pipeline para IR/ASM
+# ANTLR y pipeline para IR/MIPS
 from antlr4 import InputStream, CommonTokenStream  # type: ignore
 from antlr4.error.ErrorListener import ErrorListener  # type: ignore
 
@@ -49,8 +50,10 @@ from antlr.sema.checker import Checker  # noqa
 
 from compiscript.codegen.irgen import IRGen
 from compiscript.ir.pretty import format_ir
-from compiscript.codegen.x86_naive import X86Naive
 
+# --- Cambiado: x86 -> MIPS ---
+# from compiscript.codegen.x86_naive import X86Naive
+from compiscript.codegen.ass_mips import MIPSNaive
 
 # Estilos y estado base
 
@@ -59,11 +62,14 @@ st.set_page_config(page_title="VSCompi+", layout="wide")
 if "editor_nonce" not in st.session_state:
     st.session_state.editor_nonce = 0
 if "code" not in st.session_state:
-    st.session_state.code = 'function main(): integer {\n  print("Hola");\n  return 0;\n}'
+    st.session_state.code = (
+        'function main(): integer {\n  print("Hola");\n  return 0;\n}'
+    )
 if "ir_text" not in st.session_state:
     st.session_state.ir_text = ""
-if "asm_text" not in st.session_state:
-    st.session_state.asm_text = ""
+# Cambiamos asm_text -> mips_text
+if "mips_text" not in st.session_state:
+    st.session_state.mips_text = ""
 if "last_sample" not in st.session_state:
     st.session_state.last_sample = "(ninguno)"
 
@@ -98,12 +104,12 @@ st.markdown(
 )
 
 st.markdown('<div class="title">VSCompi+</div>', unsafe_allow_html=True)
-st.caption("IDE ligera para Compiscript — diagnósticos, AST, símbolos, quick-fixes y hover")
+st.caption(
+    "IDE ligera para Compiscript — diagnósticos, AST, símbolos, quick-fixes y hover"
+)
 
 
- 
 # Sidebar: selector de .cps + toggles
- 
 
 tests_dir = ROOT / "tests"
 examples_dir = ROOT / "examples"
@@ -153,9 +159,8 @@ if sel_sample != st.session_state.last_sample:
         st.sidebar.error("No se pudo cargar: " + str(ex))
 
 
- 
 # Helpers mini (sin regex/strip)
- 
+
 
 def _parse_sem_line(msg: str):
     if (len(msg) >= 4) and (msg[0] == "["):
@@ -174,7 +179,11 @@ def _parse_sem_line(msg: str):
                 i += 1
                 if i < len(msg) and msg[i] == " ":
                     i += 1
-                return {"line": lnum, "col": cnum, "message": msg[i:] if i < len(msg) else ""}
+                return {
+                    "line": lnum,
+                    "col": cnum,
+                    "message": msg[i:] if i < len(msg) else "",
+                }
     return {"line": None, "col": None, "message": msg}
 
 
@@ -202,12 +211,24 @@ def _tolower(s: str) -> str:
 
 def _is_semantic_label(lbl: str) -> bool:
     t = _tolower(lbl)
-    return ("sem" in t) or ("type" in t) or ("typing" in t) or ("name" in t) or ("symbol" in t)
+    return (
+        ("sem" in t)
+        or ("type" in t)
+        or ("typing" in t)
+        or ("name" in t)
+        or ("symbol" in t)
+    )
 
 
 def _is_syntax_label(lbl: str) -> bool:
     t = _tolower(lbl)
-    return ("lex" in t) or ("parse" in t) or ("syntax" in t) or ("lexer" in t) or ("parser" in t)
+    return (
+        ("lex" in t)
+        or ("parse" in t)
+        or ("syntax" in t)
+        or ("lexer" in t)
+        or ("parser" in t)
+    )
 
 
 def _norm_diag_from_dict(e: Dict[str, Any], default_kind: str) -> Dict[str, Any]:
@@ -259,7 +280,9 @@ def _norm_diag(e: Any, default_kind: str) -> Dict[str, Any]:
     return {"kind": default_kind, "line": 1, "col": 0, "message": ""}
 
 
-def _collect_diagnostics(res: Optional[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+def _collect_diagnostics(
+    res: Optional[Dict[str, Any]],
+) -> Dict[str, List[Dict[str, Any]]]:
     lexsyn: List[Dict[str, Any]] = []
     sem: List[Dict[str, Any]] = []
     if not isinstance(res, dict):
@@ -358,14 +381,20 @@ def _join_params(plist: List[Dict[str, Any]]) -> str:
 
 def _tok_type_name(tid: int) -> str:
     names = getattr(CompiscriptLexer, "symbolicNames", None)
-    if isinstance(names, list) and (tid is not None) and (tid >= 0) and (tid < len(names)):
+    if (
+        isinstance(names, list)
+        and (tid is not None)
+        and (tid >= 0)
+        and (tid < len(names))
+    ):
         nm = names[tid]
         if isinstance(nm, str) and len(nm) > 0:
             return nm
     return str(tid)
 
 
-# IR/ASM: helpers
+# IR/MIPS: helpers
+
 
 class _SyntaxErrorListener(ErrorListener):
     def __init__(self):
@@ -376,8 +405,8 @@ class _SyntaxErrorListener(ErrorListener):
         self.errors.append(f"[{line}:{column}] {msg}")
 
 
-def build_ir_and_asm(src_code: str) -> tuple[str, str]:
-    """Parsea + chequea + genera IR y ASM (x86). Lanza excepción con mensajes si hay errores."""
+def build_ir_and_mips(src_code: str) -> tuple[str, str]:
+    """Parsea + chequea + genera IR y ASM (MIPS). Lanza excepción con mensajes si hay errores."""
     inp = InputStream(src_code)
     lexer = CompiscriptLexer(inp)
     tokens = CommonTokenStream(lexer)
@@ -401,10 +430,14 @@ def build_ir_and_asm(src_code: str) -> tuple[str, str]:
 
     ir_prog = IRGen().build(ast)
     ir_text = format_ir(ir_prog)
-    asm_text = X86Naive().compile(ir_prog)
-    return ir_text, asm_text
+
+    # Generar MIPS (el backend ya intenta optimizar internamente)
+    mips_text = MIPSNaive().compile(ir_prog)
+    return ir_text, mips_text
+
 
 # --- Utilidad: copiar al portapapeles sin f-strings (evita llaves '{{}}' en JS) ---
+
 
 def _copy_to_clipboard(text: str):
     # Fallback robusto: primero execCommand('copy') sobre un <textarea> oculto,
@@ -424,20 +457,22 @@ def _copy_to_clipboard(text: str):
       }
     })();
     </script>
-    """ % json.dumps(text)
+    """ % json.dumps(
+        text
+    )
     components.html(html, height=0, width=0)
 
 
- 
-# Layout: Editor + IR/ASM + Panel
- 
+# Layout: Editor + IR/MIPS + Panel
 
 left, right = st.columns([1.1, 0.9])
 
 with left:
     st.subheader("Código")
     # Editor básico: cada cambio hace rerun → si 'Analizar automáticamente' está ON, reanaliza
-    st.text_area("Fuente Compiscript", key="code", height=380, label_visibility="collapsed")
+    st.text_area(
+        "Fuente Compiscript", key="code", height=380, label_visibility="collapsed"
+    )
 
     # Barra de estado (líneas y caracteres)
     num_lines = st.session_state.code.count("\n") + 1 if st.session_state.code else 1
@@ -459,29 +494,27 @@ with left:
         st.caption("Auto: si está activado en la barra lateral, analiza al teclear.")
 
 with right:
-        st.markdown('<div class="panel">', unsafe_allow_html=True)
-        st.write("Opciones rápidas")
-        st.checkbox(
-            "Analizar automáticamente",
-            value=auto_analyze,
-            key="__aa",
-            help="Si lo activas, cada edición re-analiza el código.",
-        )
-        st.checkbox(
-            "Ocultar built-ins",
-            value=hide_builtins,
-            key="__hb",
-            help="No mostrar funciones built-in (ej. print) en la tabla de símbolos.",
-        )
-        st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown('<div class="panel">', unsafe_allow_html=True)
+    st.write("Opciones rápidas")
+    st.checkbox(
+        "Analizar automáticamente",
+        value=auto_analyze,
+        key="__aa",
+        help="Si lo activas, cada edición re-analiza el código.",
+    )
+    st.checkbox(
+        "Ocultar built-ins",
+        value=hide_builtins,
+        key="__hb",
+        help="No mostrar funciones built-in (ej. print) en la tabla de símbolos.",
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
 
-        use_auto_flag = st.session_state.get("__aa", auto_analyze)
-        hide_builtins = st.session_state.get("__hb", hide_builtins)
+    use_auto_flag = st.session_state.get("__aa", auto_analyze)
+    hide_builtins = st.session_state.get("__hb", hide_builtins)
 
 
- 
 # Análisis
- 
 
 result: Optional[Dict[str, Any]] = None
 do_analyze = bool(run_click) or bool(use_auto_flag)
@@ -538,7 +571,7 @@ with m4:
         unsafe_allow_html=True,
     )
 with m5:
-    fns = (gl.get("functions", []) or [])
+    fns = gl.get("functions", []) or []
     if hide_builtins:
         tmp = []
         i = 0
@@ -567,8 +600,9 @@ if show_ast:
     tabs_labels.append("AST")
 if show_quickfix:
     tabs_labels.append("Quick-fixes")
-# Nueva pestaña para CI (IR) y ASM x86
-tabs_labels.append("CI / x86")
+# --- Cambiado: separar CI y MIPS en pestañas distintas ---
+tabs_labels.append("CI (IR)")
+tabs_labels.append("ASM (MIPS)")
 if show_tokens:
     tabs_labels.append("Tokens")
 
@@ -579,13 +613,18 @@ t = 0
 with tabs[t]:
     st.subheader("Errores léxicos/sintácticos")
     if _count_list(lexsyn) == 0:
-        st.markdown('<div class="ok">Sin errores léxicos/sintácticos.</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="ok">Sin errores léxicos/sintácticos.</div>',
+            unsafe_allow_html=True,
+        )
     else:
         st.dataframe(lexsyn, use_container_width=True)
 
     st.subheader("Errores semánticos")
     if _count_list(sem) == 0:
-        st.markdown('<div class="ok">Sin errores semánticos.</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="ok">Sin errores semánticos.</div>', unsafe_allow_html=True
+        )
     else:
         st.dataframe(sem, use_container_width=True)
 
@@ -595,8 +634,12 @@ with tabs[t]:
     # A) Por línea/columna
     with c1:
         st.markdown("**Por línea/columna**")
-        h_line = st.number_input("Línea (1-based)", min_value=1, value=1, step=1, key="hover_line")
-        h_col = st.number_input("Columna (0-based)", min_value=0, value=0, step=1, key="hover_col")
+        h_line = st.number_input(
+            "Línea (1-based)", min_value=1, value=1, step=1, key="hover_line"
+        )
+        h_col = st.number_input(
+            "Columna (0-based)", min_value=0, value=0, step=1, key="hover_col"
+        )
         if st.button("Consultar (línea/columna)"):
             try:
                 h = hover_at(st.session_state.code, int(h_line), int(h_col))
@@ -619,7 +662,19 @@ with tabs[t]:
                 ln = tkn.get("line", 1)
                 cl = tkn.get("col", 0)
                 tn = _tok_type_name(int(tkn.get("type", -1)))
-                token_opts.append("#" + str(i) + " '" + str(txt) + "' - " + str(ln) + ":" + str(cl) + " (" + tn + ")")
+                token_opts.append(
+                    "#"
+                    + str(i)
+                    + " '"
+                    + str(txt)
+                    + "' - "
+                    + str(ln)
+                    + ":"
+                    + str(cl)
+                    + " ("
+                    + tn
+                    + ")"
+                )
                 i += 1
             idx = st.selectbox(
                 "Selecciona un token",
@@ -649,6 +704,7 @@ with tabs[t]:
             i += 1
         if found is None:
             st.warning("No se encontró ese token.")
+        # (si found, mostramos hover)
         else:
             ln = int(found.get("line", 1))
             cl = int(found.get("col", 0))
@@ -754,7 +810,9 @@ if show_ast:
                 st.graphviz_chart(dot)
             except Exception:
                 st.code(dot, language="dot")
-            st.download_button("Descargar DOT", data=dot, file_name="ast.dot", mime="text/vnd.graphviz")
+            st.download_button(
+                "Descargar DOT", data=dot, file_name="ast.dot", mime="text/vnd.graphviz"
+            )
         else:
             st.info("AST no solicitado / vacío.")
     t += 1
@@ -773,44 +831,83 @@ if show_quickfix:
             ms = d.get("message", "")
             sem_msgs.append("[" + str(int(ln)) + ":" + str(int(cl)) + "] " + (ms or ""))
             i += 1
-        fixes = suggest_fixes(st.session_state.code, sem_msgs, result.get("symbols", {}) or {})
+        fixes = suggest_fixes(
+            st.session_state.code, sem_msgs, result.get("symbols", {}) or {}
+        )
         if _count_list(fixes) == 0:
-            st.markdown('<div class="ok">No hay sugerencias.</div>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="ok">No hay sugerencias.</div>', unsafe_allow_html=True
+            )
         else:
             st.dataframe(fixes, use_container_width=True)
     t += 1
 
-# ---- CI / x86 ----
+# ---- CI (IR) ----
 with tabs[t]:
-    st.subheader("CI (IR) y ASM (x86)")
-    if st.button("Crear CI y ASM", key="__gen_ci_asm_btn", help="Generar representación intermedia y ensamblador x86 a partir del código actual"):
+    st.subheader("CI (IR)")
+    # Botón de generar en esta pestaña
+    if st.button(
+        "Generar IR y MIPS",
+        key="__gen_ci_mips_btn_ir",
+        help="Generar representación intermedia y ensamblador MIPS a partir del código actual",
+    ):
         try:
-            ir_text, asm_text = build_ir_and_asm(st.session_state.code)
+            ir_text, mips_text = build_ir_and_mips(st.session_state.code)
             st.session_state.ir_text = ir_text
-            st.session_state.asm_text = asm_text
-            st.success("CI/ASM generados correctamente.")
+            st.session_state.mips_text = mips_text
+            st.success("IR/MIPS generados correctamente.")
         except Exception as ex:
             st.error(str(ex))
 
-    # Fila CI (IR) ocupa mitad de la página; la otra mitad botón + mensaje
+    # Panel del IR
     ci_code_col, ci_btn_col = st.columns(2)
     with ci_code_col:
         st.code(st.session_state.ir_text or "", language="text")
     with ci_btn_col:
-        if st.button("Copiar CI", key="__copy_ci_btn"):
+        if st.button("Copiar IR", key="__copy_ci_btn"):
             _copy_to_clipboard(st.session_state.ir_text)
-            st.success("CI copiado ✅")
+            st.success("IR copiado ✅")
 
-    # Fila ASM (x86) ocupa mitad de la página; la otra mitad botón + mensaje
+t += 1
+
+# ---- ASM (MIPS) ----
+with tabs[t]:
+    st.subheader("ASM (MIPS)")
+    # Botón alterno por comodidad (si llegan directo aquí)
+    if st.button(
+        "Generar IR y MIPS",
+        key="__gen_ci_mips_btn_mips",
+        help="Generar representación intermedia y ensamblador MIPS a partir del código actual",
+    ):
+        try:
+            ir_text, mips_text = build_ir_and_mips(st.session_state.code)
+            st.session_state.ir_text = ir_text
+            st.session_state.mips_text = mips_text
+            st.success("IR/MIPS generados correctamente.")
+        except Exception as ex:
+            st.error(str(ex))
+
     asm_code_col, asm_btn_col = st.columns(2)
     with asm_code_col:
-        st.code(st.session_state.asm_text or "", language="nasm")
-    with asm_btn_col:
-        if st.button("Copiar ASM", key="__copy_asm_btn_tab"):
-            _copy_to_clipboard(st.session_state.asm_text)
-            st.success("ASM copiado ✅")
+        # 'asm' como lenguaje genérico; no hay highlighter específico para MIPS
+        st.code(st.session_state.mips_text or "", language="asm")
 
-    
+    with asm_btn_col:
+        # Copiar
+        if st.button("Copiar MIPS", key="__copy_mips_btn_tab"):
+            _copy_to_clipboard(st.session_state.mips_text)
+            st.success("MIPS copiado ✅")
+
+        # Descargar con nombre único: MIPS_YYYYMMDD_HHMMSS.s
+        ts = time.strftime("%Y%m%d_%H%M%S", time.localtime())
+        dl_name = f"MIPS_{ts}.s"
+        st.download_button(
+            "Descargar MIPS (.s)",
+            data=st.session_state.mips_text or "",
+            file_name=dl_name,
+            mime="text/plain",
+            help="Descarga el .s para abrirlo en QtSpim/QtSPIM",
+        )
 
 t += 1
 
