@@ -17,6 +17,19 @@ function fibonacci(n: integer): integer {
   return r;
 }
 
+// Función Ackermann
+function ackermann(m: integer, n: integer): integer {
+  if (m == 0) {
+    return n + 1;
+  }
+  if (n == 0) {
+    return ackermann(m - 1, 1);
+  }
+  let inner: integer = ackermann(m, n - 1);
+  let res: integer = ackermann(m - 1, inner);
+  return res;
+}
+
 // Clase base
 class Persona {
   let nombre: string;
@@ -64,6 +77,7 @@ class Estudiante : Persona {
 // Programa principal
 let log: string = "";
 let fibo: string = "";
+let ack: string = "";
 
 let nombre: string = "Sergio";
 let sergio: Estudiante = new Estudiante(nombre, 15, 4);
@@ -111,12 +125,25 @@ log = log + "Promedio (entero): " + toString(prom) + "\n";
 log = log + "Prueba: Fibonacci recursivo\n";
 printString(log);
 
-let nFib: integer = 40;
+let nFib: integer = 20;
 let k: integer = 0;
 while (k <= nFib) {
   let fk: integer = fibonacci(k);
   fibo = "Fib(" + toString(k) + ") = " + toString(fk) + "\n";
   printString(fibo);
   k = k + 1;
+}
+
+printString("Prueba: Ackermann\n");
+let m: integer = 0;
+while (m <= 3) {
+  let n: integer = 0;
+  while (n <= 8) {
+    let a: integer = ackermann(m, n);
+    ack = "A(" + toString(m) + ", " + toString(n) + ") = " + toString(a) + "\n";
+    printString(ack);
+    n = n + 1;
+  }
+  m = m + 1;
 }
 
